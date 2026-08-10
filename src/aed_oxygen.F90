@@ -210,6 +210,12 @@ SUBROUTINE aed_define_oxygen(data, namlst)
 !BEGIN
    print *,"        aed_oxygen configuration"
 
+   IF ( aed_write_nml_mode ) THEN
+      WRITE(namlst,'(A)') "! aed_oxygen: dissolved oxygen dynamics"
+      WRITE(namlst, nml=aed_oxygen)
+      RETURN
+   ENDIF
+
    ! Read the namelist
    read(namlst,nml=aed_oxygen,iostat=status)
    IF (status /= 0) STOP 'Error reading namelist aed_oxygen'

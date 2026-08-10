@@ -489,6 +489,25 @@ SUBROUTINE aed_define_sedflux(data, namlst)
 !BEGIN
    print *,"        aed_sedflux configuration"
 
+   IF ( aed_write_nml_mode ) THEN
+      !# no universal default sediment flux model exists; seed a "constant"
+      !# baseline with placeholder release rates for the flux variables
+      !# consumed by this baseline's other modules (oxygen/silica/nitrogen/
+      !# phosphorus/organic_matter) - the rest are left unconfigured (MISVAL)
+      sedflux_model = 'constant'
+      Fsed_oxy = -20.0 ; Fsed_rsi = 1.8
+      Fsed_amm = 3.0   ; Fsed_nit = -1.5
+      Fsed_frp = 0.3
+      Fsed_pon = 5.0   ; Fsed_don = 2.0
+      Fsed_pop = 0.5   ; Fsed_dop = 0.2
+      Fsed_poc = 15.0  ; Fsed_doc = 5.0
+      WRITE(namlst,'(A)') "! aed_sedflux: sediment-water flux source for oxygen/silica/nitrogen/phosphorus/organic_matter"
+      WRITE(namlst, nml=aed_sedflux)
+      WRITE(namlst,'(A)') "! aed_sed_constant: only used when aed_sedflux::sedflux_model = 'constant'"
+      WRITE(namlst, nml=aed_sed_constant)
+      RETURN
+   ENDIF
+
    ! Read the namelist
    read(namlst,nml=aed_sedflux,iostat=status)
    IF (status /= 0) STOP 'ERROR reading namelist for &aed_sedflux'

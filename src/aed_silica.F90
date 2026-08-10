@@ -132,6 +132,12 @@ SUBROUTINE aed_define_silica(data, namlst)
 !BEGIN
    print *,"        aed_silica configuration"
 
+   IF ( aed_write_nml_mode ) THEN
+      WRITE(namlst,'(A)') "! aed_silica: dissolved reactive silica dynamics"
+      WRITE(namlst, nml=aed_silica)
+      RETURN
+   ENDIF
+
    ! Read the namelist
    read(namlst,nml=aed_silica,iostat=status)
    IF (status /= 0) STOP 'Error reading namelist for &aed_silica'

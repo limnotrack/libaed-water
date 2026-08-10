@@ -332,6 +332,12 @@ SUBROUTINE aed_define_organic_matter(data, namlst)
 !BEGIN
    print *,"        aed_organic_matter configuration"
 
+   IF ( aed_write_nml_mode ) THEN
+      WRITE(namlst,'(A)') "! aed_organic_matter: particulate/dissolved organic matter pools"
+      WRITE(namlst, nml=aed_organic_matter)
+      RETURN
+   ENDIF
+
    ! Default parameters set above at declaration
 
    ! Read the namelist

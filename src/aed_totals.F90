@@ -155,6 +155,12 @@ SUBROUTINE aed_define_totals(data, namlst)
 !BEGIN
    print *,"        aed_totals configuration"
 
+   IF ( aed_write_nml_mode ) THEN
+      WRITE(namlst,'(A)') "! aed_totals: derived TN/TP/TOC/... aggregate diagnostics (opt-in per variable)"
+      WRITE(namlst, nml=aed_totals)
+      RETURN
+   ENDIF
+
    ! Read the namelist
    read(namlst,nml=aed_totals,iostat=status)
    IF (status /= 0) STOP 'Error reading namelist aed_totals'

@@ -182,6 +182,12 @@ SUBROUTINE aed_define_phosphorus(data, namlst)
 !BEGIN
    print *,"        aed_phosphorus configuration"
 
+   IF ( aed_write_nml_mode ) THEN
+      WRITE(namlst,'(A)') "! aed_phosphorus: filterable reactive phosphorus dynamics"
+      WRITE(namlst, nml=aed_phosphorus)
+      RETURN
+   ENDIF
+
    ! Read the namelist
    read(namlst,nml=aed_phosphorus,iostat=status)
    IF (status /= 0) STOP 'Error reading namelist for &aed_phosphorus'

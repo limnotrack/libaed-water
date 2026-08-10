@@ -233,6 +233,17 @@ SUBROUTINE aed_define_nitrogen(data, namlst)
 !BEGIN
    print *,"        aed_nitrogen configuration"
 
+   IF ( aed_write_nml_mode ) THEN
+      !# Rnh4o2/Rnh4no2 have no inline default (module quirk, not write_nml-
+      !# specific - an omitted key is equally undefined on a real READ);
+      !# zero them here purely so the written template doesn't leak
+      !# uninitialised stack values.
+      Rnh4o2 = 0.0 ; Rnh4no2 = 0.0
+      WRITE(namlst,'(A)') "! aed_nitrogen: nitrogen cycling (ammonium/nitrate/N2O)"
+      WRITE(namlst, nml=aed_nitrogen)
+      RETURN
+   ENDIF
+
    !# Set defaults
    data%simExposed    = .false.
 

@@ -53,6 +53,7 @@ MODULE aed_core
    PUBLIC aed_locate_global,           aed_locate_sheet_global
 
    PUBLIC host_has_cell_vel
+   PUBLIC aed_write_nml_mode
    PUBLIC zero_, one_, nan_, misval_, secs_per_day
    PUBLIC model_list, last_model, aed_thread, aed_n_threads
    PUBLIC n_aed_models
@@ -174,6 +175,12 @@ MODULE aed_core
    CLASS(aed_model_data_t), POINTER :: current_model => null()
 
    LOGICAL :: host_has_cell_vel = .false.
+
+   !# Set by the host driver (GLM's aed_init_glm, BIND(C)) before calling
+   !# aed_define_model in --write_nml mode. Individual modules' define()
+   !# routines check this to WRITE their compiled-in defaults instead of
+   !# READing an existing config, then return before variable registration.
+   LOGICAL :: aed_write_nml_mode = .false.
 
 #ifdef f2003
    USE, intrinsic :: iso_fortran_env, ONLY : stdin=>input_unit, &

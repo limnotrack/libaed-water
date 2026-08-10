@@ -593,6 +593,18 @@ SUBROUTINE aed_define_phytoplankton(data, namlst)
 !BEGIN
    print *,"        aed_phytoplankton configuration"
 
+   IF ( aed_write_nml_mode ) THEN
+      !# no universal default group list exists; seed one placeholder group
+      !# (id 1, looked up from dbase) so the section is directly usable
+      num_phytos = 1
+      the_phytos(1) = 1
+      WRITE(namlst,'(A)') "! aed_phytoplankton: phytoplankton functional groups"
+      WRITE(namlst,'(A)') "! the_phytos ids are looked up from dbase (default: aed_phyto_pars.csv) - " // &
+                           "supply that file separately with your group's parameters"
+      WRITE(namlst, nml=aed_phytoplankton)
+      RETURN
+   ENDIF
+
    ! Read the main aed namelist, and set module level parameters
    read(namlst,nml=aed_phytoplankton,iostat=status)
    IF (status /= 0) STOP 'Error reading namelist for &aed_phytoplankton'
