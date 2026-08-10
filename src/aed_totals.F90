@@ -157,7 +157,28 @@ SUBROUTINE aed_define_totals(data, namlst)
 
    IF ( aed_write_nml_mode ) THEN
       WRITE(namlst,'(A)') "! aed_totals: derived TN/TP/TOC/... aggregate diagnostics (opt-in per variable)"
-      WRITE(namlst, nml=aed_totals)
+      WRITE(namlst,'(A)') "! Each *_vars list names state variables to sum into that total; *_varscale"
+      WRITE(namlst,'(A)') "! gives a matching per-variable multiplier (e.g. unit conversion). Empty by"
+      WRITE(namlst,'(A)') "! default - nothing is aggregated unless you list variables here."
+      WRITE(namlst,'(A)') "&aed_totals"
+      CALL aed_nml_wsa(namlst, 'tn_vars',        tn_vars,        0, 'State variables summed into total nitrogen (TN)')
+      CALL aed_nml_wra(namlst, 'tn_varscale',     tn_varscale,    0, 'Per-variable scale factors for tn_vars')
+      CALL aed_nml_wsa(namlst, 'tkn_vars',        tkn_vars,       0, 'State variables summed into total Kjeldahl nitrogen (TKN)')
+      CALL aed_nml_wra(namlst, 'tkn_varscale',    tkn_varscale,   0, 'Per-variable scale factors for tkn_vars')
+      CALL aed_nml_wsa(namlst, 'tp_vars',         tp_vars,        0, 'State variables summed into total phosphorus (TP)')
+      CALL aed_nml_wra(namlst, 'tp_varscale',     tp_varscale,    0, 'Per-variable scale factors for tp_vars')
+      CALL aed_nml_wsa(namlst, 'toc_vars',        toc_vars,       0, 'State variables summed into total organic carbon (TOC)')
+      CALL aed_nml_wra(namlst, 'toc_varscale',    toc_varscale,   0, 'Per-variable scale factors for toc_vars')
+      CALL aed_nml_wsa(namlst, 'tss_vars',        tss_vars,       0, 'State variables summed into total suspended solids (TSS)')
+      CALL aed_nml_wra(namlst, 'tss_varscale',    tss_varscale,   0, 'Per-variable scale factors for tss_vars')
+      CALL aed_nml_wsa(namlst, 'turb_vars',       turb_vars,      0, 'State variables summed into turbidity')
+      CALL aed_nml_wra(namlst, 'turb_varscale',   turb_varscale,  0, 'Per-variable scale factors for turb_vars')
+      CALL aed_nml_wsa(namlst, 'tfe_vars',        tfe_vars,       0, 'State variables summed into total iron (TFe)')
+      CALL aed_nml_wra(namlst, 'tfe_varscale',    tfe_varscale,   0, 'Per-variable scale factors for tfe_vars')
+      CALL aed_nml_wsa(namlst, 'tal_vars',        tal_vars,       0, 'State variables summed into total alkalinity (TAl)')
+      CALL aed_nml_wra(namlst, 'tal_varscale',    tal_varscale,   0, 'Per-variable scale factors for tal_vars')
+      CALL aed_nml_wl(namlst,  'outputLight',     outputLight,    'Include light-related diagnostics (PAR extinction, etc.) in the totals output')
+      WRITE(namlst,'(A)') "/"
       RETURN
    ENDIF
 

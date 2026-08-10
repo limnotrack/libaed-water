@@ -502,9 +502,41 @@ SUBROUTINE aed_define_sedflux(data, namlst)
       Fsed_pop = 0.5   ; Fsed_dop = 0.2
       Fsed_poc = 15.0  ; Fsed_doc = 5.0
       WRITE(namlst,'(A)') "! aed_sedflux: sediment-water flux source for oxygen/silica/nitrogen/phosphorus/organic_matter"
-      WRITE(namlst, nml=aed_sedflux)
+      WRITE(namlst,'(A)') "&aed_sedflux"
+      CALL aed_nml_ws(namlst, 'sedflux_model', sedflux_model, 'Sediment flux model: ''constant'' (see aed_sed_constant below) or ''dynamic'' variants')
+      CALL aed_nml_wi(namlst, 'diag_level',    diag_level,    'Diagnostic output verbosity: 0=none, 1=basic, 2=flux rates, 3=other metrics, 10=all debug')
+      WRITE(namlst,'(A)') "/"
+      WRITE(namlst,'(A)') ""
+
       WRITE(namlst,'(A)') "! aed_sed_constant: only used when aed_sedflux::sedflux_model = 'constant'"
-      WRITE(namlst, nml=aed_sed_constant)
+      WRITE(namlst,'(A)') "&aed_sed_constant"
+      CALL aed_nml_wi(namlst, 'nzones',        nzones,        'Number of sediment zones with independently configurable flux rates')
+      CALL aed_nml_wr(namlst, 'Fsed_oxy',      Fsed_oxy,      'Sediment oxygen demand (SOD) (mmol O2/m2/day)')
+      CALL aed_nml_wr(namlst, 'Fsed_rsi',      Fsed_rsi,      'Sediment silica flux (mmol Si/m2/day)')
+      CALL aed_nml_wr(namlst, 'Fsed_amm',      Fsed_amm,      'Sediment ammonium flux (mmol N/m2/day)')
+      CALL aed_nml_wr(namlst, 'Fsed_nit',      Fsed_nit,      'Sediment nitrate flux (mmol N/m2/day)')
+      CALL aed_nml_wr(namlst, 'Fsed_frp',      Fsed_frp,      'Sediment FRP flux (mmol P/m2/day)')
+      CALL aed_nml_wr(namlst, 'Fsed_pon',      Fsed_pon,      'Sediment particulate organic N flux (mmol N/m2/day)')
+      CALL aed_nml_wr(namlst, 'Fsed_don',      Fsed_don,      'Sediment dissolved organic N flux (mmol N/m2/day)')
+      CALL aed_nml_wr(namlst, 'Fsed_pop',      Fsed_pop,      'Sediment particulate organic P flux (mmol P/m2/day)')
+      CALL aed_nml_wr(namlst, 'Fsed_dop',      Fsed_dop,      'Sediment dissolved organic P flux (mmol P/m2/day)')
+      CALL aed_nml_wr(namlst, 'Fsed_poc',      Fsed_poc,      'Sediment particulate organic C flux (mmol C/m2/day)')
+      CALL aed_nml_wr(namlst, 'Fsed_doc',      Fsed_doc,      'Sediment dissolved organic C flux (mmol C/m2/day)')
+      CALL aed_nml_wro(namlst, 'Fsed_feii',        Fsed_feii,        'Sediment ferrous iron flux (mmol Fe/m2/day); requires aed_geochemistry')
+      CALL aed_nml_wro(namlst, 'Fsed_dic',         Fsed_dic,         'Sediment dissolved inorganic carbon flux (mmol C/m2/day)')
+      CALL aed_nml_wro(namlst, 'Fsed_ch4',         Fsed_ch4,         'Sediment methane flux (mmol C/m2/day); requires aed_methane')
+      CALL aed_nml_wro(namlst, 'Fsed_ch4_ebb',     Fsed_ch4_ebb,     'Sediment methane ebullition flux (mmol C/m2/day)')
+      CALL aed_nml_wro(namlst, 'Fsed_n2o',         Fsed_n2o,         'Sediment N2O flux (mmol N/m2/day)')
+      CALL aed_nml_wro(namlst, 'Fsed_dic_dry',     Fsed_dic_dry,     'Dry/exposed-sediment DIC flux (mmol C/m2/day)')
+      CALL aed_nml_wro(namlst, 'Fsed_ch4_dry',     Fsed_ch4_dry,     'Dry/exposed-sediment methane flux (mmol C/m2/day)')
+      CALL aed_nml_wro(namlst, 'Fsed_ch4_ebb_dry', Fsed_ch4_ebb_dry, 'Dry/exposed-sediment methane ebullition flux (mmol C/m2/day)')
+      CALL aed_nml_wro(namlst, 'Fsed_n2o_dry',     Fsed_n2o_dry,     'Dry/exposed-sediment N2O flux (mmol N/m2/day)')
+      CALL aed_nml_wro(namlst, 'Fsed_ass',         Fsed_ass,         'Sediment acidity (alkalinity) flux, per-zone (eq/m2/day)')
+      CALL aed_nml_wro(namlst, 'Fsed_ass_dry',     Fsed_ass_dry,     'Dry/exposed-sediment acidity flux, per-zone (eq/m2/day)')
+      CALL aed_nml_wro(namlst, 'Fstm_ch4',         Fstm_ch4,         'Methane storage/ebullition threshold flux (mmol C/m2/day)')
+      CALL aed_nml_wro(namlst, 'Ktau_0',           Ktau_0,           'Critical bed shear stress for resuspension-linked flux scaling (N/m2)')
+      WRITE(namlst,'(A)') "/"
+      WRITE(namlst,'(A)') ""
       RETURN
    ENDIF
 

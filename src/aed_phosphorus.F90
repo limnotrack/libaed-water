@@ -184,7 +184,37 @@ SUBROUTINE aed_define_phosphorus(data, namlst)
 
    IF ( aed_write_nml_mode ) THEN
       WRITE(namlst,'(A)') "! aed_phosphorus: filterable reactive phosphorus dynamics"
-      WRITE(namlst, nml=aed_phosphorus)
+      WRITE(namlst,'(A)') "&aed_phosphorus"
+      CALL aed_nml_wr(namlst, 'frp_initial',                   frp_initial,                   'Initial filterable reactive phosphorus (FRP) concentration (mmol P/m3)')
+      CALL aed_nml_wr(namlst, 'frp_min',                       frp_min,                       'Minimum FRP concentration; enforces negative-number clipping (mmol P/m3)')
+      CALL aed_nml_wr(namlst, 'frp_max',                       frp_max,                       'Maximum FRP concentration; enforces high-number clipping (mmol P/m3)')
+      CALL aed_nml_wr(namlst, 'Fsed_frp',                      Fsed_frp,                      'Sediment FRP flux (mmol P/m2/day)')
+      CALL aed_nml_wr(namlst, 'Ksed_frp',                      Ksed_frp,                      'Half-saturation oxygen concentration for the sediment FRP flux (mmol O2/m3)')
+      CALL aed_nml_wr(namlst, 'theta_sed_frp',                 theta_sed_frp,                 'Arrhenius temperature multiplier for sediment FRP flux')
+      CALL aed_nml_ws(namlst, 'Fsed_frp_variable',             Fsed_frp_variable,             'Link to aed_sedflux for a spatially/temporally varying Fsed_frp')
+      CALL aed_nml_ws(namlst, 'phosphorus_reactant_variable',  phosphorus_reactant_variable,  'Link to aed_oxygen; enables oxygen-dependence of the sediment flux')
+      CALL aed_nml_wl(namlst, 'simPO4Adsorption',               simPO4Adsorption,              'Enable FRP adsorption to particles')
+      CALL aed_nml_wi(namlst, 'PO4AdsorptionModel',             PO4AdsorptionModel,            'FRP adsorption isotherm: 1=Langmuir, 2=Freundlich (model-dependent)')
+      CALL aed_nml_wl(namlst, 'ads_use_external_tss',           ads_use_external_tss,          'Use an externally supplied TSS variable as the adsorption particle pool')
+      CALL aed_nml_ws(namlst, 'frp_ads_particle_link',          frp_ads_particle_link,         'Link to the particle variable FRP adsorbs onto')
+      CALL aed_nml_ws(namlst, 'po4sorption_target_variable',    po4sorption_target_variable,   'Link to the sorbed-P state variable FRP adsorption feeds')
+      CALL aed_nml_wr(namlst, 'Kpo4p',                          Kpo4p,                         'Half-saturation/partitioning coefficient for FRP adsorption')
+      CALL aed_nml_wr(namlst, 'theta_Kpo4',                     theta_Kpo4,                    'Arrhenius temperature multiplier for FRP adsorption')
+      CALL aed_nml_wr(namlst, 'K_sal',                          K_sal,                         'Half-saturation salinity for the salinity-dependent adsorption response')
+      CALL aed_nml_wr(namlst, 'Kadsratio',                      Kadsratio,                     'Adsorption/desorption rate ratio')
+      CALL aed_nml_wr(namlst, 'Qmax',                           Qmax,                          'Maximum sorption capacity per unit particle mass')
+      CALL aed_nml_wl(namlst, 'ads_use_pH',                     ads_use_pH,                    'Enable pH-dependence of FRP adsorption (requires pH_variable)')
+      CALL aed_nml_ws(namlst, 'pH_variable',                    pH_variable,                   'Link to aed_carbon pH state variable')
+      CALL aed_nml_wr(namlst, 'w_po4ads',                       w_po4ads,                      'Settling velocity of adsorbed/particulate FRP (m/day)')
+      CALL aed_nml_wl(namlst, 'simDryDeposition',                simDryDeposition,              'Enable atmospheric dry deposition of particulate inorganic P')
+      CALL aed_nml_wl(namlst, 'simWetDeposition',                simWetDeposition,              'Enable atmospheric wet deposition of FRP (rainfall)')
+      CALL aed_nml_wr(namlst, 'atm_pip_dd',                      atm_pip_dd,                    'Atmospheric particulate inorganic P dry-deposition rate (mmol P/m2/day)')
+      CALL aed_nml_wr(namlst, 'atm_frp_conc',                    atm_frp_conc,                  'Atmospheric FRP concentration in rainfall (mmol P/m3)')
+      CALL aed_nml_wi(namlst, 'resuspension',                    resuspension,                  'Sediment resuspension coupling: 0=off')
+      CALL aed_nml_ws(namlst, 'resus_link',                      resus_link,                    'Link to the resuspension-flux driver variable')
+      CALL aed_nml_wi(namlst, 'diag_level',                      diag_level,                    'Diagnostic output verbosity: 0=none, 1=basic, 2=flux rates, 3=other metrics, 10=all debug')
+      WRITE(namlst,'(A)') "/"
+      WRITE(namlst,'(A)') ""
       RETURN
    ENDIF
 

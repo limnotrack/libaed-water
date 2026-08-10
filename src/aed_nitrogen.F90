@@ -234,13 +234,73 @@ SUBROUTINE aed_define_nitrogen(data, namlst)
    print *,"        aed_nitrogen configuration"
 
    IF ( aed_write_nml_mode ) THEN
-      !# Rnh4o2/Rnh4no2 have no inline default (module quirk, not write_nml-
-      !# specific - an omitted key is equally undefined on a real READ);
-      !# zero them here purely so the written template doesn't leak
+      !# Rnh4o2/Rnh4no2/simExposed have no inline default (module quirk, not
+      !# write_nml-specific - an omitted key is equally undefined on a real
+      !# READ); set them here purely so the written template doesn't leak
       !# uninitialised stack values.
-      Rnh4o2 = 0.0 ; Rnh4no2 = 0.0
+      Rnh4o2 = 0.0 ; Rnh4no2 = 0.0 ; simExposed = .false.
       WRITE(namlst,'(A)') "! aed_nitrogen: nitrogen cycling (ammonium/nitrate/N2O)"
-      WRITE(namlst, nml=aed_nitrogen)
+      WRITE(namlst,'(A)') "&aed_nitrogen"
+      CALL aed_nml_wr(namlst, 'n_min',                     n_min,                     'Minimum N-state concentration; enforces negative-number clipping (mmol N/m3)')
+      CALL aed_nml_wr(namlst, 'n_max',                     n_max,                     'Maximum N-state concentration; enforces high-number clipping (mmol N/m3)')
+      CALL aed_nml_wr(namlst, 'nit_initial',                nit_initial,               'Initial nitrate (NOx) concentration (mmol N/m3)')
+      CALL aed_nml_wr(namlst, 'amm_initial',                amm_initial,               'Initial ammonium concentration (mmol N/m3)')
+      CALL aed_nml_wr(namlst, 'n2o_initial',                n2o_initial,               'Initial nitrous oxide (N2O) concentration (mmol N/m3)')
+      CALL aed_nml_wr(namlst, 'no2_initial',                no2_initial,               'Initial nitrite (NO2) concentration (mmol N/m3)')
+      CALL aed_nml_wr(namlst, 'Rnitrif',                    Rnitrif,                   'Maximum nitrification rate, ammonium to nitrate (/day)')
+      CALL aed_nml_wr(namlst, 'Rdenit',                     Rdenit,                    'Maximum denitrification rate, nitrate to N2/N2O (/day)')
+      CALL aed_nml_wr(namlst, 'Fsed_amm',                   Fsed_amm,                  'Sediment ammonium flux (mmol N/m2/day)')
+      CALL aed_nml_wr(namlst, 'Fsed_nit',                   Fsed_nit,                  'Sediment nitrate flux (mmol N/m2/day)')
+      CALL aed_nml_wr(namlst, 'Knitrif',                    Knitrif,                   'Half-saturation oxygen concentration for nitrification (mmol O2/m3)')
+      CALL aed_nml_wr(namlst, 'Kdenit',                     Kdenit,                    'Half-saturation oxygen concentration inhibiting denitrification (mmol O2/m3)')
+      CALL aed_nml_wr(namlst, 'Ksed_amm',                   Ksed_amm,                  'Half-saturation oxygen concentration for the sediment ammonium flux (mmol O2/m3)')
+      CALL aed_nml_wr(namlst, 'Ksed_nit',                   Ksed_nit,                  'Half-saturation oxygen concentration for the sediment nitrate flux (mmol O2/m3)')
+      CALL aed_nml_wr(namlst, 'Kpart_ammox',                Kpart_ammox,               'Half-saturation particle concentration for ammonium adsorption (g/m3)')
+      CALL aed_nml_wr(namlst, 'Kin_deamm',                  Kin_deamm,                 'Nitrite inhibition constant for anammox')
+      CALL aed_nml_wr(namlst, 'Rno2o2',                     Rno2o2,                    'Nitrite oxidation rate, NO2 to NO3 (/day)')
+      CALL aed_nml_wr(namlst, 'Rnh4o2',                     Rnh4o2,                    'Ammonium oxidation rate, NH4 to NO2, aerobic (/day)')
+      CALL aed_nml_wr(namlst, 'Rnh4no2',                    Rnh4no2,                   'Ammonium oxidation rate via anammox, NH4+NO2 to N2 (/day)')
+      CALL aed_nml_wr(namlst, 'theta_nitrif',                theta_nitrif,              'Arrhenius temperature multiplier for nitrification')
+      CALL aed_nml_wr(namlst, 'theta_denit',                 theta_denit,               'Arrhenius temperature multiplier for denitrification')
+      CALL aed_nml_ws(namlst, 'nitrif_reactant_variable',    nitrif_reactant_variable,  'Link to aed_oxygen; required oxygen source for nitrification')
+      CALL aed_nml_ws(namlst, 'denit_product_variable',      denit_product_variable,    'Link to a state variable receiving denitrification''s gas product')
+      CALL aed_nml_ws(namlst, 'nitrif_ph_variable',          nitrif_ph_variable,        'Link to aed_carbon pH; enables pH-dependence of nitrification')
+      CALL aed_nml_ws(namlst, 'Fsed_amm_variable',           Fsed_amm_variable,         'Link to aed_sedflux for a spatially/temporally varying Fsed_amm')
+      CALL aed_nml_ws(namlst, 'Fsed_nit_variable',           Fsed_nit_variable,         'Link to aed_sedflux for a spatially/temporally varying Fsed_nit')
+      CALL aed_nml_ws(namlst, 'Fsed_n2o_variable',           Fsed_n2o_variable,         'Link to aed_sedflux for a spatially/temporally varying Fsed_n2o')
+      CALL aed_nml_ws(namlst, 'Fsed_no2_variable',           Fsed_no2_variable,         'Link to aed_sedflux for a spatially/temporally varying Fsed_no2')
+      CALL aed_nml_wi(namlst, 'simN2O',                      simN2O,                    'N2O/NO2 sub-model: 0=off, 1=N2O only, 2=N2O+NO2 advanced redox')
+      CALL aed_nml_wr(namlst, 'atm_n2o',                     atm_n2o,                   'Atmospheric N2O concentration (ppm)')
+      CALL aed_nml_wi(namlst, 'oxy_lim',                     oxy_lim,                   'Oxygen limitation function on nitrification: 0=off, 1=on')
+      CALL aed_nml_wr(namlst, 'Rn2o',                        Rn2o,                      'N2O production rate (/day)')
+      CALL aed_nml_wr(namlst, 'Fsed_n2o',                    Fsed_n2o,                  'Sediment N2O flux (mmol N/m2/day)')
+      CALL aed_nml_wr(namlst, 'Ksed_n2o',                    Ksed_n2o,                  'Half-saturation oxygen concentration for the sediment N2O flux (mmol O2/m3)')
+      CALL aed_nml_wi(namlst, 'n2o_piston_model',            n2o_piston_model,          'Atmospheric N2O exchange piston velocity model')
+      CALL aed_nml_wr(namlst, 'Ranammox',                    Ranammox,                  'Deprecated - must stay <=1e-10; replaced by kanammox')
+      CALL aed_nml_wr(namlst, 'kanammox',                    kanammox,                  'Anammox rate, NH4+NO2 to N2 (/day)')
+      CALL aed_nml_wr(namlst, 'Rdnra',                       Rdnra,                     'DNRA rate, dissimilatory nitrate reduction to ammonium (/day)')
+      CALL aed_nml_wr(namlst, 'Kanmx_nit',                   Kanmx_nit,                 'Half-saturation nitrite concentration for anammox (mmol N/m3)')
+      CALL aed_nml_wr(namlst, 'Kanmx_amm',                   Kanmx_amm,                 'Half-saturation ammonium concentration for anammox (mmol N/m3)')
+      CALL aed_nml_wr(namlst, 'Kdnra_oxy',                   Kdnra_oxy,                 'Half-saturation oxygen concentration inhibiting DNRA (mmol O2/m3)')
+      CALL aed_nml_wl(namlst, 'simNitrfpH',                  simNitrfpH,                'Enable pH-dependence of nitrification (requires nitrif_ph_variable)')
+      CALL aed_nml_wl(namlst, 'simNitrfLight',               simNitrfLight,             'Enable light-dependence of nitrification')
+      CALL aed_nml_wl(namlst, 'simNitrfSal',                 simNitrfSal,               'Enable salinity-dependence of nitrification')
+      CALL aed_nml_wr(namlst, 'K_sal',                       K_sal,                     'Half-saturation salinity for the salinity-dependent nitrification response')
+      CALL aed_nml_wr(namlst, 'S0',                          S0,                        'Reference/optimal salinity for the salinity-dependent nitrification response')
+      CALL aed_nml_wl(namlst, 'simDryDeposition',            simDryDeposition,          'Enable atmospheric dry deposition of DIN/PN')
+      CALL aed_nml_wl(namlst, 'simWetDeposition',            simWetDeposition,          'Enable atmospheric wet deposition of DIN/PN (rainfall)')
+      CALL aed_nml_wr(namlst, 'atm_din_dd',                  atm_din_dd,                'Atmospheric dissolved inorganic N dry-deposition rate (mmol N/m2/day)')
+      CALL aed_nml_wr(namlst, 'atm_din_conc',                atm_din_conc,              'Atmospheric dissolved inorganic N concentration in rainfall (mmol N/m3)')
+      CALL aed_nml_wr(namlst, 'atm_pn_dd',                   atm_pn_dd,                 'Atmospheric particulate N dry-deposition rate (mmol N/m2/day)')
+      CALL aed_nml_wr(namlst, 'f_dindep_nox',                f_dindep_nox,              'Fraction of deposited DIN allocated to nitrate (remainder to ammonium)')
+      CALL aed_nml_wi(namlst, 'Fsed_nit_model',              Fsed_nit_model,            'Sediment nitrate flux model selector')
+      CALL aed_nml_wl(namlst, 'simExposed',                  simExposed,                'Enable dry/exposed-sediment N cycling (auto-enabled when dry_model>0)')
+      CALL aed_nml_wi(namlst, 'dry_model',                   dry_model,                 'Dry/exposed-sediment nitrogen model: 0=off')
+      CALL aed_nml_wr(namlst, 'theta_sed_dry',                theta_sed_dry,             'Arrhenius temperature multiplier for dry/exposed-sediment N flux')
+      CALL aed_nml_wr(namlst, 'Fsed_n2o_dry',                 Fsed_n2o_dry,              'Dry/exposed-sediment N2O flux (mmol N/m2/day)')
+      CALL aed_nml_wi(namlst, 'diag_level',                  diag_level,                'Diagnostic output verbosity: 0=none, 1=basic, 2=flux rates, 3=other metrics, 10=all debug')
+      WRITE(namlst,'(A)') "/"
+      WRITE(namlst,'(A)') ""
       RETURN
    ENDIF
 
