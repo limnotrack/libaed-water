@@ -97,6 +97,7 @@ MODULE aed_carbon
       AED_REAL :: maxMPBProdn, IkMPB
       AED_REAL :: Fsed_dic_dry, Fsed_ch4_dry, Fsed_ch4_ebb_dry, theta_sed_dry
       AED_REAL :: Fstm_ch4, theta_stm_ch4
+      AED_REAL :: talk_fixed
 
      CONTAINS
          PROCEDURE :: define             => aed_define_carbon
@@ -161,6 +162,7 @@ SUBROUTINE aed_define_carbon(data, namlst)
 
    INTEGER           :: co2_model        = 1
    INTEGER           :: alk_mode         = 1
+   AED_REAL          :: talk_fixed       = nan_    ! required if alk_mode==6; total alkalinity (umol/kg)
    INTEGER           :: ebb_model        = 0
    INTEGER           :: co2_piston_model = 1
    INTEGER           :: ch4_piston_model = 1
@@ -213,7 +215,7 @@ SUBROUTINE aed_define_carbon(data, namlst)
                          Fsed_ch4,Ksed_ch4,theta_sed_ch4,Fsed_ch4_variable,    &
                          atm_co2,atm_ch4,                                      &
                          co2_piston_model, ch4_piston_model,                   &
-                         co2_model, alk_mode, ebb_model,                       &
+                         co2_model, alk_mode, talk_fixed, ebb_model,           &
                          Fsed_ch4_ebb, Fsed_ebb_variable,                      &
                          ch4_bub_aLL,ch4_bub_cLL, ch4_bub_kLL,                 &
                          ch4_bub_disf1, ch4_bub_disf2, ch4_bub_disdp,          &
@@ -305,6 +307,14 @@ SUBROUTINE aed_define_carbon(data, namlst)
       STOP
    ENDIF
 
+   !# alk_mode==6 uses a user-prescribed fixed Total Alkalinity instead of
+   !# one of the site-specific regressions (modes 1-5) - talk_fixed must be
+   !# explicitly set in that case, since its compiled default is NaN.
+   IF ( alk_mode == 6 .AND. (talk_fixed /= talk_fixed) ) THEN
+      print *,'Error: aed_carbon alk_mode=6 requires talk_fixed to be set (total alkalinity, umol/kg)'
+      STOP
+   ENDIF
+
    !# Update configuration flags after options read in
    IF (ebb_model>0)  data%simCH4ebb = .true.
    IF (dry_model>0)  data%simExposed = .true.     ! MH in wrong location?
@@ -319,6 +329,7 @@ SUBROUTINE aed_define_carbon(data, namlst)
    data%ionic            = ionic
    data%co2_model        = co2_model
    data%alk_mode         = alk_mode
+   data%talk_fixed       = talk_fixed
    data%atm_co2          = atm_co2
    data%co2_piston_model = co2_piston_model
 
@@ -685,6 +696,10 @@ SUBROUTINE aed_calculate_surface_carbon(data,column,layer_idx)
             talk = talk / 1.0D6      ! change unit to mol/kgSW
 
             TCO2 = TCO2 * dcf
+         ELSEIF( data%alk_mode == 6 ) THEN
+            ! User-prescribed fixed Total Alkalinity (talk_fixed in &aed_carbon)
+            talk = data%talk_fixed
+            talk = talk / 1.0D6      ! change unit to mol/kgSW
          ENDIF
 
          !CALL CO2DYN ( TCO2, talk, T, S, pCO2, pH, HENRY, ca, bc, cb)
@@ -1173,6 +1188,10 @@ SUBROUTINE aed_equilibrate_carbon(data,column,layer_idx)
 
          ! P. Huang add to match old version
          TCO2 = TCO2 * dcf
+      ELSEIF( data%alk_mode == 6 ) THEN
+         ! User-prescribed fixed Total Alkalinity (talk_fixed in &aed_carbon)
+         talk = data%talk_fixed
+         talk = talk / 1.0D6      ! change unit to mol/kgSW
       ENDIF
 
       !CALL CO2DYN ( TCO2, talk, T, S, pCO2, pH, HENRY, ca, bc, cb)
