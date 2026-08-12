@@ -134,7 +134,18 @@ SUBROUTINE aed_define_silica(data, namlst)
 
    IF ( aed_write_nml_mode ) THEN
       WRITE(namlst,'(A)') "! aed_silica: dissolved reactive silica dynamics"
-      WRITE(namlst, nml=aed_silica)
+      WRITE(namlst,'(A)') "&aed_silica"
+      CALL aed_nml_wr(namlst, 'rsi_initial',              rsi_initial,              'Initial dissolved reactive silica (RSi) concentration (mmol Si/m3)')
+      CALL aed_nml_wr(namlst, 'rsi_min',                  rsi_min,                  'Minimum RSi concentration; enforces negative-number clipping (mmol Si/m3)')
+      CALL aed_nml_wr(namlst, 'rsi_max',                  rsi_max,                  'Maximum RSi concentration; enforces high-number clipping (mmol Si/m3)')
+      CALL aed_nml_wr(namlst, 'Fsed_rsi',                 Fsed_rsi,                 'Sediment silica flux (mmol Si/m2/day)')
+      CALL aed_nml_wr(namlst, 'Ksed_rsi',                 Ksed_rsi,                 'Half-saturation oxygen concentration controlling the sediment silica flux (mmol O2/m3)')
+      CALL aed_nml_wr(namlst, 'theta_sed_rsi',            theta_sed_rsi,            'Arrhenius temperature multiplier for sediment silica flux')
+      CALL aed_nml_ws(namlst, 'silica_reactant_variable', silica_reactant_variable, 'Link to aed_oxygen; enables oxygen-dependence of the sediment flux')
+      CALL aed_nml_ws(namlst, 'Fsed_rsi_variable',        Fsed_rsi_variable,        'Link to aed_sedflux for a spatially/temporally varying Fsed_rsi')
+      CALL aed_nml_wi(namlst, 'diag_level',               diag_level,               'Diagnostic output verbosity: 0=none, 1=basic, 2=flux rates, 3=other metrics, 10=all debug')
+      WRITE(namlst,'(A)') "/"
+      WRITE(namlst,'(A)') ""
       RETURN
    ENDIF
 

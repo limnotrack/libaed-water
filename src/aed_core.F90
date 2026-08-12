@@ -54,6 +54,7 @@ MODULE aed_core
 
    PUBLIC host_has_cell_vel
    PUBLIC aed_write_nml_mode
+   PUBLIC aed_nml_wr, aed_nml_wi, aed_nml_wl, aed_nml_ws, aed_nml_wra, aed_nml_wsa, aed_nml_wro, aed_nml_wia
    PUBLIC zero_, one_, nan_, misval_, secs_per_day
    PUBLIC model_list, last_model, aed_thread, aed_n_threads
    PUBLIC n_aed_models
@@ -235,6 +236,265 @@ INTEGER FUNCTION aed_init_core(dname, have_cell_vel)
    IF (PRESENT(have_cell_vel)) host_has_cell_vel = have_cell_vel
    aed_init_core = 0
 END FUNCTION aed_init_core
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+FUNCTION nml_pad(s, w) RESULT(p)
+!-------------------------------------------------------------------------------
+! Left-justify s into a field at least w characters wide, so callers can
+! build aligned key/value/comment columns with plain string concatenation
+! instead of juggling format edit descriptors. Never truncates: a fixed-
+! length CHARACTER(len=w) assignment would silently cut s short past w
+! characters, which for a namelist KEY means writing a name that no longer
+! matches the real variable on read-back - result length is MAX(w,LEN(s))
+! so callers just lose alignment (not correctness) for the rare overlong
+! name.
+!-------------------------------------------------------------------------------
+   CHARACTER(*),INTENT(in) :: s
+   INTEGER,INTENT(in)      :: w
+   CHARACTER(len=MAX(w,LEN(s))) :: p
+!-------------------------------------------------------------------------------
+!BEGIN
+   p = s
+END FUNCTION nml_pad
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+FUNCTION fmt_real(val) RESULT(s)
+!-------------------------------------------------------------------------------
+! Format an AED_REAL for human display: 7 significant digits (G0.7, enough to
+! round-trip these parameters without gfortran's raw ~17-digit double-
+! precision noise, e.g. 0.29999999999999999 for a literal 0.3 default), then
+! strip trailing fractional zeros (and a bare trailing '.') so 300.000000
+! becomes 300 and 0.1000000 becomes 0.1. The exponent part of scientific
+! notation (if G0.7 chooses it) is left as gfortran formats it.
+!-------------------------------------------------------------------------------
+   AED_REAL,INTENT(in) :: val
+   CHARACTER(len=24) :: s
+!
+!LOCALS
+   CHARACTER(len=24) :: raw
+   INTEGER :: epos, dpos, i, lastnz
+!-------------------------------------------------------------------------------
+!BEGIN
+   WRITE(raw,'(G0.7)') val
+   raw = ADJUSTL(raw)
+   epos = INDEX(raw,'E')
+   IF ( epos == 0 ) epos = LEN_TRIM(raw) + 1
+   dpos = INDEX(raw(1:epos-1),'.')
+   IF ( dpos > 0 ) THEN
+      lastnz = dpos
+      DO i=epos-1,dpos+1,-1
+         IF ( raw(i:i) /= '0' ) THEN
+            lastnz = i
+            EXIT
+         ENDIF
+      ENDDO
+      IF ( lastnz == dpos ) THEN
+         raw = raw(1:dpos-1) // raw(epos:LEN_TRIM(raw))
+      ELSE
+         raw = raw(1:lastnz) // raw(epos:LEN_TRIM(raw))
+      ENDIF
+   ENDIF
+   s = raw
+END FUNCTION fmt_real
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+SUBROUTINE aed_nml_wr(unit, key, val, comment)
+!-------------------------------------------------------------------------------
+! Write one AED_REAL scalar namelist key, glm4_template.nml-style: trimmed
+! value (not gfortran's raw 17-digit/full-width namelist output), aligned
+! columns, one-line comment.
+!-------------------------------------------------------------------------------
+   INTEGER,INTENT(in)      :: unit
+   CHARACTER(*),INTENT(in) :: key, comment
+   AED_REAL,INTENT(in)     :: val
+!
+!LOCALS
+   CHARACTER(len=32) :: vstr
+!-------------------------------------------------------------------------------
+!BEGIN
+   vstr = fmt_real(val)
+   WRITE(unit,'(A)') '   '//nml_pad(TRIM(key),20)//'= '//nml_pad(TRIM(vstr),16)//'!# '//TRIM(comment)
+END SUBROUTINE aed_nml_wr
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+SUBROUTINE aed_nml_wi(unit, key, val, comment)
+!-------------------------------------------------------------------------------
+! Write one INTEGER scalar namelist key - see aed_nml_wr.
+!-------------------------------------------------------------------------------
+   INTEGER,INTENT(in)      :: unit, val
+   CHARACTER(*),INTENT(in) :: key, comment
+!
+!LOCALS
+   CHARACTER(len=16) :: vstr
+!-------------------------------------------------------------------------------
+!BEGIN
+   WRITE(vstr,'(I0)') val
+   WRITE(unit,'(A)') '   '//nml_pad(TRIM(key),20)//'= '//nml_pad(TRIM(vstr),16)//'!# '//TRIM(comment)
+END SUBROUTINE aed_nml_wi
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+SUBROUTINE aed_nml_wro(unit, key, val, comment)
+!-------------------------------------------------------------------------------
+! Like aed_nml_wr, but for a key whose default is the "unconfigured" sentinel
+! misval_ - write it commented-out (matching glm4_template.nml's convention
+! for no-default keys) rather than exposing the raw -9999 as if it were a
+! deliberately chosen setting.
+!-------------------------------------------------------------------------------
+   INTEGER,INTENT(in)      :: unit
+   CHARACTER(*),INTENT(in) :: key, comment
+   AED_REAL,INTENT(in)     :: val
+!
+!LOCALS
+   CHARACTER(len=32) :: vstr
+!-------------------------------------------------------------------------------
+!BEGIN
+   IF ( val == misval_ ) THEN
+      WRITE(unit,'(A)') '!  '//nml_pad(TRIM(key),20)//'= '//nml_pad(' ',16)// &
+                         '!# '//TRIM(comment)//' (unset by default)'
+   ELSE
+      vstr = fmt_real(val)
+      WRITE(unit,'(A)') '   '//nml_pad(TRIM(key),20)//'= '//nml_pad(TRIM(vstr),16)//'!# '//TRIM(comment)
+   ENDIF
+END SUBROUTINE aed_nml_wro
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+SUBROUTINE aed_nml_wl(unit, key, val, comment)
+!-------------------------------------------------------------------------------
+! Write one LOGICAL scalar namelist key - see aed_nml_wr.
+!-------------------------------------------------------------------------------
+   INTEGER,INTENT(in)      :: unit
+   LOGICAL,INTENT(in)      :: val
+   CHARACTER(*),INTENT(in) :: key, comment
+!
+!LOCALS
+   CHARACTER(len=8) :: vstr
+!-------------------------------------------------------------------------------
+!BEGIN
+   IF ( val ) THEN ; vstr = '.true.' ; ELSE ; vstr = '.false.' ; ENDIF
+   WRITE(unit,'(A)') '   '//nml_pad(TRIM(key),20)//'= '//nml_pad(TRIM(vstr),16)//'!# '//TRIM(comment)
+END SUBROUTINE aed_nml_wl
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+SUBROUTINE aed_nml_ws(unit, key, val, comment)
+!-------------------------------------------------------------------------------
+! Write one CHARACTER scalar namelist key. An empty/unset default is written
+! commented-out, matching glm4_template.nml's convention for no-default keys.
+!-------------------------------------------------------------------------------
+   INTEGER,INTENT(in)      :: unit
+   CHARACTER(*),INTENT(in) :: key, val, comment
+!-------------------------------------------------------------------------------
+!BEGIN
+   IF ( LEN_TRIM(val) == 0 ) THEN
+      WRITE(unit,'(A)') '!  '//nml_pad(TRIM(key),20)//"= ''"//nml_pad(' ',14)// &
+                         '!# '//TRIM(comment)//' (unset by default)'
+   ELSE
+      WRITE(unit,'(A)') '   '//nml_pad(TRIM(key),20)//"= '"//TRIM(val)//"'"// &
+                         nml_pad(' ',MAX(1,15-LEN_TRIM(val)))//'!# '//TRIM(comment)
+   ENDIF
+END SUBROUTINE aed_nml_ws
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+SUBROUTINE aed_nml_wra(unit, key, val, n, comment)
+!-------------------------------------------------------------------------------
+! Write only the first n (active) elements of an AED_REAL array, one per line
+! as key(i) = value, rather than gfortran's raw r*value-compacted, full-
+! (compile-time-max)-length namelist output. n <= 0 (nothing configured) is
+! written as a single commented-out placeholder line.
+!-------------------------------------------------------------------------------
+   INTEGER,INTENT(in)      :: unit, n
+   AED_REAL,INTENT(in)     :: val(:)
+   CHARACTER(*),INTENT(in) :: key, comment
+!
+!LOCALS
+   INTEGER :: i
+   CHARACTER(len=32) :: vstr, kstr
+!-------------------------------------------------------------------------------
+!BEGIN
+   IF ( n <= 0 ) THEN
+      WRITE(unit,'(A)') '!  '//nml_pad(TRIM(key),20)//'= '//nml_pad(' ',16)// &
+                         '!# '//TRIM(comment)//' (comma-separated list; unset by default)'
+      RETURN
+   ENDIF
+   DO i=1,n
+      WRITE(kstr,'(A,A,I0,A)') TRIM(key), '(', i, ')'
+      vstr = fmt_real(val(i))
+      WRITE(unit,'(A)') '   '//nml_pad(TRIM(kstr),20)//'= '//nml_pad(TRIM(vstr),16)// &
+                         '!# '//TRIM(comment)
+   ENDDO
+END SUBROUTINE aed_nml_wra
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+SUBROUTINE aed_nml_wia(unit, key, val, n, comment)
+!-------------------------------------------------------------------------------
+! INTEGER array equivalent of aed_nml_wra.
+!-------------------------------------------------------------------------------
+   INTEGER,INTENT(in)      :: unit, n
+   INTEGER,INTENT(in)      :: val(:)
+   CHARACTER(*),INTENT(in) :: key, comment
+!
+!LOCALS
+   INTEGER :: i
+   CHARACTER(len=32) :: vstr, kstr
+!-------------------------------------------------------------------------------
+!BEGIN
+   IF ( n <= 0 ) THEN
+      WRITE(unit,'(A)') '!  '//nml_pad(TRIM(key),20)//'= '//nml_pad(' ',16)// &
+                         '!# '//TRIM(comment)//' (comma-separated list; unset by default)'
+      RETURN
+   ENDIF
+   DO i=1,n
+      WRITE(kstr,'(A,A,I0,A)') TRIM(key), '(', i, ')'
+      WRITE(vstr,'(I0)') val(i)
+      WRITE(unit,'(A)') '   '//nml_pad(TRIM(kstr),20)//'= '//nml_pad(TRIM(vstr),16)// &
+                         '!# '//TRIM(comment)
+   ENDDO
+END SUBROUTINE aed_nml_wia
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+SUBROUTINE aed_nml_wsa(unit, key, val, n, comment)
+!-------------------------------------------------------------------------------
+! CHARACTER array equivalent of aed_nml_wra.
+!-------------------------------------------------------------------------------
+   INTEGER,INTENT(in)      :: unit, n
+   CHARACTER(*),INTENT(in) :: val(:)
+   CHARACTER(*),INTENT(in) :: key, comment
+!
+!LOCALS
+   INTEGER :: i
+   CHARACTER(len=32) :: kstr
+!-------------------------------------------------------------------------------
+!BEGIN
+   IF ( n <= 0 ) THEN
+      WRITE(unit,'(A)') '!  '//nml_pad(TRIM(key),20)//'= '//nml_pad(' ',16)// &
+                         '!# '//TRIM(comment)//' (comma-separated list; unset by default)'
+      RETURN
+   ENDIF
+   DO i=1,n
+      WRITE(kstr,'(A,A,I0,A)') TRIM(key), '(', i, ')'
+      WRITE(unit,'(A)') '   '//nml_pad(TRIM(kstr),20)//"= '"//TRIM(val(i))//"'"// &
+                         nml_pad(' ',MAX(1,15-LEN_TRIM(val(i))))//'!# '//TRIM(comment)
+   ENDDO
+END SUBROUTINE aed_nml_wsa
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 

@@ -212,7 +212,19 @@ SUBROUTINE aed_define_oxygen(data, namlst)
 
    IF ( aed_write_nml_mode ) THEN
       WRITE(namlst,'(A)') "! aed_oxygen: dissolved oxygen dynamics"
-      WRITE(namlst, nml=aed_oxygen)
+      WRITE(namlst,'(A)') "&aed_oxygen"
+      CALL aed_nml_wr(namlst, 'oxy_initial',       oxy_initial,       'Initial dissolved oxygen (DO) concentration (mmol O2/m3)')
+      CALL aed_nml_wr(namlst, 'oxy_min',           oxy_min,           'Minimum DO concentration; enforces negative-number clipping (mmol O2/m3)')
+      CALL aed_nml_wr(namlst, 'oxy_max',           oxy_max,           'Maximum DO concentration; enforces high-number clipping (mmol O2/m3)')
+      CALL aed_nml_wr(namlst, 'Fsed_oxy',          Fsed_oxy,          'Sediment oxygen demand (SOD) (mmol O2/m2/day)')
+      CALL aed_nml_wr(namlst, 'Ksed_oxy',          Ksed_oxy,          'Half-saturation concentration of oxygen sediment flux (mmol O2/m3)')
+      CALL aed_nml_wr(namlst, 'theta_sed_oxy',     theta_sed_oxy,     'Arrhenius temperature multiplier for sediment oxygen flux')
+      CALL aed_nml_ws(namlst, 'Fsed_oxy_variable', Fsed_oxy_variable, 'Link to aed_sedflux for a spatially/temporally varying Fsed_oxy')
+      CALL aed_nml_wi(namlst, 'oxy_piston_model',  oxy_piston_model,  'Atmospheric exchange piston velocity model (1-X; depends on waterbody type)')
+      CALL aed_nml_wr(namlst, 'altitude',          altitude,          'Altitude of site above sea level (m); changes oxygen solubility')
+      CALL aed_nml_wi(namlst, 'diag_level',        diag_level,        'Diagnostic output verbosity: 0=none, 1=basic, 2-10=most, >10=debug')
+      WRITE(namlst,'(A)') "/"
+      WRITE(namlst,'(A)') ""
       RETURN
    ENDIF
 
