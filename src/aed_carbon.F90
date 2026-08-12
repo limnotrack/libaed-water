@@ -227,6 +227,68 @@ SUBROUTINE aed_define_carbon(data, namlst)
 !BEGIN
    print *,"        aed_carbon configuration"
 
+   IF ( aed_write_nml_mode ) THEN
+      !# simCH4ebb has no inline default (module quirk, not write_nml-specific
+      !# - an omitted key is equally undefined on a real READ); set it here
+      !# purely so the written template doesn't leak an uninitialised stack
+      !# value.
+      simCH4ebb = .false.
+      WRITE(namlst,'(A)') "! aed_carbon: dissolved inorganic carbon, pH/alkalinity, and methane dynamics"
+      WRITE(namlst,'(A)') "&aed_carbon"
+      CALL aed_nml_wr(namlst, 'dic_initial',              dic_initial,              'Initial dissolved inorganic carbon (DIC) concentration (mmol C/m3)')
+      CALL aed_nml_wr(namlst, 'pH_initial',                pH_initial,               'Initial pH')
+      CALL aed_nml_wr(namlst, 'ch4_initial',               ch4_initial,              'Initial methane (CH4) concentration (mmol C/m3)')
+      CALL aed_nml_wr(namlst, 'ionic',                     ionic,                    'Ionic strength, for carbonate speciation (mol/L)')
+      CALL aed_nml_wr(namlst, 'Rch4ox',                    Rch4ox,                   'Maximum methane oxidation rate (/day)')
+      CALL aed_nml_wr(namlst, 'Kch4ox',                    Kch4ox,                   'Half-saturation oxygen concentration for methane oxidation (mmol O2/m3)')
+      CALL aed_nml_wr(namlst, 'vTch4ox',                   vTch4ox,                  'Arrhenius temperature multiplier for methane oxidation')
+      CALL aed_nml_ws(namlst, 'methane_reactant_variable', methane_reactant_variable,'Link to aed_oxygen; required oxygen source for methane oxidation')
+      CALL aed_nml_wl(namlst, 'simCH4',                    simCH4,                   'Enable methane (CH4) simulation')
+      CALL aed_nml_wr(namlst, 'Fsed_dic',                  Fsed_dic,                 'Sediment DIC flux (mmol C/m2/day)')
+      CALL aed_nml_wr(namlst, 'Ksed_dic',                  Ksed_dic,                 'Half-saturation oxygen concentration for the sediment DIC flux (mmol O2/m3)')
+      CALL aed_nml_wr(namlst, 'theta_sed_dic',             theta_sed_dic,            'Arrhenius temperature multiplier for sediment DIC flux')
+      CALL aed_nml_ws(namlst, 'Fsed_dic_variable',         Fsed_dic_variable,        'Link to aed_sedflux for a spatially/temporally varying Fsed_dic')
+      CALL aed_nml_wr(namlst, 'Fsed_ch4',                  Fsed_ch4,                 'Sediment methane flux (mmol C/m2/day)')
+      CALL aed_nml_wr(namlst, 'Ksed_ch4',                  Ksed_ch4,                 'Half-saturation oxygen concentration for the sediment methane flux (mmol O2/m3)')
+      CALL aed_nml_wr(namlst, 'theta_sed_ch4',             theta_sed_ch4,            'Arrhenius temperature multiplier for sediment methane flux')
+      CALL aed_nml_ws(namlst, 'Fsed_ch4_variable',         Fsed_ch4_variable,        'Link to aed_sedflux for a spatially/temporally varying Fsed_ch4')
+      CALL aed_nml_wr(namlst, 'atm_co2',                   atm_co2,                  'Atmospheric CO2 partial pressure (atm)')
+      CALL aed_nml_wr(namlst, 'atm_ch4',                   atm_ch4,                  'Atmospheric CH4 partial pressure (atm)')
+      CALL aed_nml_wi(namlst, 'co2_piston_model',          co2_piston_model,         'Atmospheric CO2 exchange piston velocity model')
+      CALL aed_nml_wi(namlst, 'ch4_piston_model',          ch4_piston_model,         'Atmospheric CH4 exchange piston velocity model')
+      CALL aed_nml_wi(namlst, 'co2_model',                 co2_model,                'CO2/carbonate system model: 0=diagnostic pCO2 only, 1=full carbonate speciation')
+      CALL aed_nml_wi(namlst, 'alk_mode',                  alk_mode,                 'Alkalinity handling mode')
+      CALL aed_nml_wi(namlst, 'ebb_model',                 ebb_model,                'Methane ebullition (bubbling) model: 0=off')
+      CALL aed_nml_wr(namlst, 'Fsed_ch4_ebb',              Fsed_ch4_ebb,             'Sediment methane ebullition flux (mmol C/m2/day)')
+      CALL aed_nml_ws(namlst, 'Fsed_ebb_variable',         Fsed_ebb_variable,        'Link to aed_sedflux for a spatially/temporally varying Fsed_ch4_ebb')
+      CALL aed_nml_wr(namlst, 'ch4_bub_aLL',                ch4_bub_aLL,              'Methane ebullition bubble-size distribution parameter a')
+      CALL aed_nml_wr(namlst, 'ch4_bub_cLL',                ch4_bub_cLL,              'Methane ebullition bubble-size distribution parameter c')
+      CALL aed_nml_wr(namlst, 'ch4_bub_kLL',                ch4_bub_kLL,              'Methane ebullition bubble-size distribution parameter k')
+      CALL aed_nml_wr(namlst, 'ch4_bub_disf1',              ch4_bub_disf1,            'Methane bubble dissolution fraction, shallow')
+      CALL aed_nml_wr(namlst, 'ch4_bub_disf2',              ch4_bub_disf2,            'Methane bubble dissolution fraction, deep')
+      CALL aed_nml_wr(namlst, 'ch4_bub_disdp',              ch4_bub_disdp,            'Methane bubble dissolution reference depth (m)')
+      CALL aed_nml_wr(namlst, 'ch4_bub_ws',                 ch4_bub_ws,               'Methane bubble rise velocity (m/day) (currently unused)')
+      CALL aed_nml_wr(namlst, 'ch4_bub_tau0',               ch4_bub_tau0,             'Methane bubble formation timescale (currently unused)')
+      CALL aed_nml_wr(namlst, 'maxMPBProdn',                maxMPBProdn,              'Maximum microphytobenthos production rate (mmol C/m2/day) (currently unused)')
+      CALL aed_nml_wr(namlst, 'IkMPB',                      IkMPB,                    'Microphytobenthos light sensitivity (currently unused)')
+      CALL aed_nml_wl(namlst, 'simExposed',                 simExposed,               'Enable dry/exposed-sediment carbon cycling (auto-enabled when dry_model>0)')
+      CALL aed_nml_wi(namlst, 'dry_model',                  dry_model,                'Dry/exposed-sediment carbon model: 0=off')
+      CALL aed_nml_wr(namlst, 'theta_sed_dry',              theta_sed_dry,            'Arrhenius temperature multiplier for dry/exposed-sediment flux')
+      CALL aed_nml_wr(namlst, 'Fsed_dic_dry',               Fsed_dic_dry,             'Dry/exposed-sediment DIC flux (mmol C/m2/day)')
+      CALL aed_nml_wr(namlst, 'Fsed_ch4_dry',               Fsed_ch4_dry,             'Dry/exposed-sediment methane flux (mmol C/m2/day)')
+      CALL aed_nml_wr(namlst, 'Fsed_ch4_ebb_dry',           Fsed_ch4_ebb_dry,         'Dry/exposed-sediment methane ebullition flux (mmol C/m2/day)')
+      CALL aed_nml_wl(namlst, 'simStemCH4',                 simStemCH4,               'Enable the plant-stem methane transport pathway')
+      CALL aed_nml_wi(namlst, 'stem_model',                 stem_model,               'Plant-stem methane transport model: 0=off')
+      CALL aed_nml_wr(namlst, 'theta_stm_ch4',              theta_stm_ch4,            'Arrhenius temperature multiplier for stem methane transport')
+      CALL aed_nml_wr(namlst, 'Fstm_ch4',                   Fstm_ch4,                 'Stem methane transport flux (mmol C/m2/day)')
+      CALL aed_nml_ws(namlst, 'vegetation_stem_density',    vegetation_stem_density,  'Link to the vegetation stem-density variable (requires stem_model=2)')
+      CALL aed_nml_wi(namlst, 'diag_level',                 diag_level,               'Diagnostic output verbosity: 0=none, 1=basic, 2=flux rates, 3=other metrics, 10=all debug')
+      CALL aed_nml_ws(namlst, 'Fstm_ch4_variable',          Fstm_ch4_variable,        'Link to aed_sedflux for a spatially/temporally varying Fstm_ch4')
+      WRITE(namlst,'(A)') "/"
+      WRITE(namlst,'(A)') ""
+      RETURN
+   ENDIF
+
    !# Set defaults
    data%simDIC        = .false.
    data%simCH4        = .false.
