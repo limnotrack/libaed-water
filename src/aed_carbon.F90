@@ -274,9 +274,11 @@ SUBROUTINE aed_define_carbon(data, namlst)
       CALL aed_nml_wl(namlst, 'simExposed',                 simExposed,               'Enable dry/exposed-sediment carbon cycling (auto-enabled when dry_model>0)')
       CALL aed_nml_wi(namlst, 'dry_model',                  dry_model,                'Dry/exposed-sediment carbon model: 0=off')
       CALL aed_nml_wr(namlst, 'theta_sed_dry',              theta_sed_dry,            'Arrhenius temperature multiplier for dry/exposed-sediment flux')
-      CALL aed_nml_wr(namlst, 'Fsed_dic_dry',               Fsed_dic_dry,             'Dry/exposed-sediment DIC flux (mmol C/m2/day)')
-      CALL aed_nml_wr(namlst, 'Fsed_ch4_dry',               Fsed_ch4_dry,             'Dry/exposed-sediment methane flux (mmol C/m2/day)')
-      CALL aed_nml_wr(namlst, 'Fsed_ch4_ebb_dry',           Fsed_ch4_ebb_dry,         'Dry/exposed-sediment methane ebullition flux (mmol C/m2/day)')
+      !# Fsed_dic_dry/Fsed_ch4_dry/Fsed_ch4_ebb_dry are declared and used
+      !# elsewhere in this subroutine but are NOT members of the NAMELIST
+      !# /aed_carbon/ group below (upstream library gap, not a write_nml
+      !# issue) - writing them here would make gfortran reject the whole
+      !# group on read-back as an unrecognized name, so they're omitted.
       CALL aed_nml_wl(namlst, 'simStemCH4',                 simStemCH4,               'Enable the plant-stem methane transport pathway')
       CALL aed_nml_wi(namlst, 'stem_model',                 stem_model,               'Plant-stem methane transport model: 0=off')
       CALL aed_nml_wr(namlst, 'theta_stm_ch4',              theta_stm_ch4,            'Arrhenius temperature multiplier for stem methane transport')
