@@ -66,6 +66,7 @@ MODULE aed_common
    PUBLIC aed_calculate, aed_calculate_surface, aed_calculate_benthic
 !  PUBLIC aed_calculate_benthic_zone
    PUBLIC aed_calculate_riparian, aed_calculate_dry, aed_calculate_column
+   PUBLIC aed_calculate_domain
    PUBLIC aed_light_extinction, aed_light_shading
    PUBLIC aed_equilibrate, aed_mobility, aed_rain_loss
    PUBLIC aed_bio_drag, aed_inflow_update
@@ -77,6 +78,7 @@ MODULE aed_common
    PUBLIC aed_model_data_t, aed_variable_t, aed_column_t, aed_ptm_t
    PUBLIC aed_init_core, aed_core_status, aed_get_var
    PUBLIC aed_provide_global, aed_provide_sheet_global, aed_thread, aed_n_threads
+   PUBLIC aed_set_timestep, aed_get_timestep
    PUBLIC V_STATE, V_DIAGNOSTIC, V_EXTERNAL, V_PARTICLE
 
    !#---------------------------------------------------------------------------
@@ -448,6 +450,24 @@ SUBROUTINE aed_calculate_riparian(column, layer_idx, pc_wet)
       model => model%next
    ENDDO
 END SUBROUTINE aed_calculate_riparian
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+SUBROUTINE aed_calculate_domain
+!-------------------------------------------------------------------------------
+! Once per host step, after all columns: whole-domain work for each module
+!-------------------------------------------------------------------------------
+!LOCALS
+   CLASS (aed_model_data_t),POINTER :: model
+!-------------------------------------------------------------------------------
+   model => model_list
+   DO WHILE (ASSOCIATED(model))
+      PTRACE("aed_calculate_domain->",trim(model%aed_model_name))
+      CALL model%calculate_domain
+      model => model%next
+   ENDDO
+END SUBROUTINE aed_calculate_domain
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 

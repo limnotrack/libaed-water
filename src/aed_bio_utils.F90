@@ -85,6 +85,14 @@ MODULE aed_bio_utils
       AED_REAL  :: resuspension, tau_0
       ! Growth form (benthic, water, surface)
       INTEGER  :: growth_form, slough_model
+      ! Physiology model selector and per-group sloughing parameters.
+      !   NOTE(2026-09-23): used by aed_macroalgae only. physiology_model
+      !   chooses the growth formulation for the group (0 = generic AED,
+      !   1 = CGM, 2 = GLCMv3); slough_rate/_stress/_burial hold the
+      !   per-group values resolved from the module-wide &aed_macroalgae
+      !   scalars and the optional *_p override arrays.
+      INTEGER  :: physiology_model
+      AED_REAL :: slough_rate, slough_stress, slough_burial
       ! Particle parameters
       INTEGER  :: simSplit
       AED_REAL :: X_cinit, X_ninit, X_pinit, X_chlinit, Cdiv, n0, Lnalphachl, mort_prob

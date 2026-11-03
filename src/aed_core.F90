@@ -53,6 +53,7 @@ MODULE aed_core
    PUBLIC aed_locate_global,           aed_locate_sheet_global
 
    PUBLIC host_has_cell_vel
+   PUBLIC aed_set_timestep, aed_get_timestep
    PUBLIC zero_, one_, nan_, misval_, secs_per_day
    PUBLIC model_list, last_model, aed_thread, aed_n_threads
    PUBLIC n_aed_models
@@ -86,6 +87,7 @@ MODULE aed_core
          procedure :: calculate_column   => aed_calculate_column
          procedure :: calculate_riparian => aed_calculate_riparian
          procedure :: calculate_dry      => aed_calculate_dry
+         procedure :: calculate_domain   => aed_calculate_domain
          procedure :: equilibrate        => aed_equilibrate
          procedure :: light_extinction   => aed_light_extinction
          procedure :: rain_loss          => aed_rain_loss
@@ -128,6 +130,7 @@ MODULE aed_core
       INTEGER           :: particle_link
       INTEGER           :: index
       LOGICAL           :: rezero
+      LOGICAL           :: output   !# .FALSE. = inter-module use only, hosts need not write it
       CLASS(aed_prefix_list_t),POINTER :: req => null()
    END TYPE aed_variable_t
    !#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -174,6 +177,11 @@ MODULE aed_core
    CLASS(aed_model_data_t), POINTER :: current_model => null()
 
    LOGICAL :: host_has_cell_vel = .false.
+
+   !# Host timestep (seconds) and substep split factor, set by the API once the
+   !# host has handed over its environment. Not available during define.
+   AED_REAL :: host_timestep = -1.
+   INTEGER  :: host_split_factor = 1
 
 #ifdef f2003
    USE, intrinsic :: iso_fortran_env, ONLY : stdin=>input_unit, &
@@ -228,6 +236,53 @@ INTEGER FUNCTION aed_init_core(dname, have_cell_vel)
    IF (PRESENT(have_cell_vel)) host_has_cell_vel = have_cell_vel
    aed_init_core = 0
 END FUNCTION aed_init_core
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+SUBROUTINE aed_set_timestep(dt, split_factor)
+!-------------------------------------------------------------------------------
+! Record the host model timestep (seconds). Called by the API/host once the
+! environment is known; modules read it back with aed_get_timestep.
+!-------------------------------------------------------------------------------
+!ARGUMENTS
+   AED_REAL,INTENT(in) :: dt
+   INTEGER,INTENT(in),OPTIONAL :: split_factor
+!
+!-------------------------------------------------------------------------------
+!BEGIN
+   host_timestep = dt
+   IF ( PRESENT(split_factor) ) host_split_factor = MAX(split_factor, 1)
+END SUBROUTINE aed_set_timestep
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+FUNCTION aed_get_timestep(substep) RESULT(dt)
+!-------------------------------------------------------------------------------
+! Return the host model timestep in seconds. With substep=.TRUE. return the
+! effective step seen by the kinetics when the API splits the host step.
+! Only valid at run time - the host has not supplied dt when define is called.
+!-------------------------------------------------------------------------------
+!ARGUMENTS
+   LOGICAL,INTENT(in),OPTIONAL :: substep
+!
+!LOCALS
+   AED_REAL :: dt
+!
+!-------------------------------------------------------------------------------
+!BEGIN
+   IF ( host_timestep <= zero_ ) THEN
+      print *,'STOP: aed_get_timestep called before the host timestep was set'
+      print *,'      (it is not available during define - call it at run time)'
+      STOP
+   ENDIF
+
+   dt = host_timestep
+   IF ( PRESENT(substep) ) THEN
+      IF ( substep ) dt = host_timestep / host_split_factor
+   ENDIF
+END FUNCTION aed_get_timestep
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
@@ -491,6 +546,7 @@ SUBROUTINE extend_allocated_variables(pcount)
    all_vars(a_vars+1:a_vars+count)%zavg = .true.
    all_vars(a_vars+1:a_vars+count)%zavg_req = .false.
    all_vars(a_vars+1:a_vars+count)%const = .false.
+   all_vars(a_vars+1:a_vars+count)%output = .true.
 
    a_vars = a_vars + count
 END SUBROUTINE extend_allocated_variables
@@ -673,13 +729,15 @@ END FUNCTION aed_define_sheet_variable
 
 
 !###############################################################################
-FUNCTION aed_define_diag_variable(name, units, longname, zavg, rezero) RESULT(ret)
+FUNCTION aed_define_diag_variable(name, units, longname, zavg, rezero, output) RESULT(ret)
 !-------------------------------------------------------------------------------
 !ARGUMENTS
    CHARACTER(*),INTENT(in) :: name, longname, units
    LOGICAL,INTENT(in),OPTIONAL :: zavg
    LOGICAL,INTENT(in),OPTIONAL :: rezero !By default, diagnostics get zeroed each timestep,
    										 !use this flag to not rezero
+   LOGICAL,INTENT(in),OPTIONAL :: output !Default .TRUE.; .FALSE. marks a diagnostic
+   										 !for inter-module use that hosts need not output
 !
 !LOCALS
    INTEGER :: ret
@@ -708,12 +766,14 @@ FUNCTION aed_define_diag_variable(name, units, longname, zavg, rezero) RESULT(re
    ELSE
       all_vars(ret)%rezero = .TRUE.
    ENDIF
+
+   IF ( PRESENT(output) ) all_vars(ret)%output = output
 END FUNCTION aed_define_diag_variable
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 !###############################################################################
-FUNCTION aed_define_sheet_diag_variable(name, units, longname, surf, zavg, rezero) RESULT(ret)
+FUNCTION aed_define_sheet_diag_variable(name, units, longname, surf, zavg, rezero, output) RESULT(ret)
 !-------------------------------------------------------------------------------
 !ARGUMENTS
    CHARACTER(*),INTENT(in) :: name, longname, units
@@ -721,6 +781,8 @@ FUNCTION aed_define_sheet_diag_variable(name, units, longname, surf, zavg, rezer
    LOGICAL,INTENT(in),OPTIONAL :: zavg
    LOGICAL,INTENT(in),OPTIONAL :: rezero !By default, diagnostics get zeroed each timestep,
    										 !use this flag to not rezero
+   LOGICAL,INTENT(in),OPTIONAL :: output !Default .TRUE.; .FALSE. marks a diagnostic
+   										 !for inter-module use that hosts need not output
 !
 !LOCALS
    INTEGER :: ret
@@ -757,6 +819,8 @@ FUNCTION aed_define_sheet_diag_variable(name, units, longname, surf, zavg, rezer
    ELSE
       all_vars(ret)%rezero = .TRUE.
    ENDIF
+
+   IF ( PRESENT(output) ) all_vars(ret)%output = output
 END FUNCTION aed_define_sheet_diag_variable
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
@@ -1155,6 +1219,19 @@ SUBROUTINE aed_calculate_dry(data, column, layer_idx)
 !-------------------------------------------------------------------------------
 !print*,"Default aed_calculate_dry ", TRIM(data%aed_model_name)
 END SUBROUTINE aed_calculate_dry
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+SUBROUTINE aed_calculate_domain(data)
+!-------------------------------------------------------------------------------
+! Called once per host step, after every column has been processed. For modules
+! that work on the whole domain at once (e.g. a coupled groundwater model).
+!-------------------------------------------------------------------------------
+   CLASS (aed_model_data_t),INTENT(inout) :: data
+!-------------------------------------------------------------------------------
+!print*,"Default aed_calculate_domain ", TRIM(data%aed_model_name)
+END SUBROUTINE aed_calculate_domain
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
