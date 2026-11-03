@@ -51,7 +51,7 @@ MODULE aed_nitrogen
 ! Nitrogen module contains equations for nitrification and denitrification
 !------------------------------------------------------------------------------+
    USE aed_core
-   USE aed_util,  ONLY: aed_gas_piston_velocity, aed_n2o_sat
+   USE aed_util,  ONLY: aed_gas_piston_velocity, aed_n2o_sat, aed_gas_exchange
 
    IMPLICIT NONE
 
@@ -63,9 +63,9 @@ MODULE aed_nitrogen
       !# Variable identifiers
       INTEGER  :: id_nox, id_amm, id_n2o, id_no2
       INTEGER  :: id_oxy, id_ph, id_temp, id_salt, id_denit_product
-      INTEGER  :: id_wind, id_E_depth, id_E_tau, id_E_dens, id_E_rain
+      INTEGER  :: id_wind, id_E_depth, id_E_tau, id_E_dens, id_E_rain, id_tstep
       INTEGER  :: id_Fsed_amm, id_Fsed_nit, id_Fsed_n2o, id_Fsed_no2
-      INTEGER  :: id_nitrf, id_denit, id_n2op, id_anammox, id_dnra
+      INTEGER  :: id_nitrf, id_denit, id_n2op, id_anammox, id_dnra, id_n2ocons
       INTEGER  :: id_sed_amm, id_sed_nit, id_sed_n2o, id_sed_no2
       INTEGER  :: id_atm_n2o, id_atm_dep
       INTEGER  :: id_cell_vel
@@ -158,9 +158,12 @@ SUBROUTINE aed_define_nitrogen(data, namlst)
    AED_REAL          :: Kdnra_oxy     = 150.0
    AED_REAL          :: Kpart_ammox   =  20.0     !Ko2_4
    AED_REAL          :: Kin_deamm     =   0.886   !Ko2_5
-   AED_REAL          :: Rno2o2
-   AED_REAL          :: Rnh4o2
-   AED_REAL          :: Rnh4no2
+   ! FIX 2026-08-29: these three namelist rates had no default initialiser,
+   ! unlike every neighbour, so if omitted from &aed_nitrogen they were used
+   ! undefined. Default them to zero_ (no reaction) like the other rates.
+   AED_REAL          :: Rno2o2        = zero_
+   AED_REAL          :: Rnh4o2        = zero_
+   AED_REAL          :: Rnh4no2       = zero_
    AED_REAL          :: theta_nitrif  = 1.0
    AED_REAL          :: theta_denit   = 1.0
    AED_REAL          :: Fsed_amm      = zero_
@@ -198,7 +201,9 @@ SUBROUTINE aed_define_nitrogen(data, namlst)
    CHARACTER(len=64) :: Fsed_n2o_variable=''
    CHARACTER(len=64) :: Fsed_no2_variable=''
 
-   LOGICAL           :: simExposed
+   ! FIX 2026-08-29: no default initialiser, yet this local is read directly at
+   ! ~L365 and was copied over data%simExposed. Default it to .false.
+   LOGICAL           :: simExposed       = .false.
    INTEGER           :: dry_model        = 0
    AED_REAL          :: theta_sed_dry    = one_
    AED_REAL          :: Fsed_n2o_dry     = zero_
@@ -239,12 +244,18 @@ SUBROUTINE aed_define_nitrogen(data, namlst)
    !---------------------------------------------------------------------------+
    ! Read the namelist
    read(namlst,nml=aed_nitrogen,iostat=status)
-   IF (status /= 0) STOP 'Error reading namelist for &aed_nitrogen'
+   IF (status /= 0) ERROR STOP 'Error reading namelist for &aed_nitrogen'
 
-   IF(Ranammox>1e-10) STOP 'Ranammox is now deprecated; please replace with kanammox.'
+   IF(Ranammox>1e-10) ERROR STOP 'Ranammox is now deprecated; please replace with kanammox.'
 
    !# Update configuration flags after options read in
+   ! FIX 2026-08-29: simExposed is a &aed_nitrogen namelist option, so honour it
+   ! here (the store block below used to re-apply it AFTER the dry_model>0
+   ! derivation and so silently undid it). dry_model>0 still forces it on, and
+   ! the local is synced back because it is also read directly at ~L365.
+   data%simExposed = simExposed
    IF (dry_model>0)  data%simExposed = .true.
+   simExposed = data%simExposed
 
    !---------------------------------------------------------------------------+
    ! Store config options and parameter values in module main data structure
@@ -298,7 +309,11 @@ SUBROUTINE aed_define_nitrogen(data, namlst)
    data%f_dindep_nox     = MIN(MAX(zero_,f_dindep_nox),one_)
 
    data%dry_model        = dry_model
-   data%simExposed       = simExposed
+   ! FIX 2026-08-29: "data%simExposed = simExposed" used to sit here and
+   ! clobbered the value derived above (set .false. at ~L237, then .true. at
+   ! ~L247 when dry_model>0) with the uninitialised local `simExposed`, which
+   ! has no default and is not in the namelist. Assignment removed; the derived
+   ! value now survives.
    data%theta_sed_dry    = theta_sed_dry
    data%Fsed_n2o_dry     = Fsed_n2o_dry/secs_per_day
 
@@ -320,7 +335,7 @@ SUBROUTINE aed_define_nitrogen(data, namlst)
        print *,'          ... found'
       ELSE
         PRINT *,'  ERROR advanced nitrogen redox set (simN2O) but no oxygen target variable is set'
-        STOP
+        ERROR STOP 1
       ENDIF
 
       data%id_n2o = aed_define_variable('n2o','mmol N/m3','nitrous oxide',     &
@@ -360,7 +375,7 @@ SUBROUTINE aed_define_nitrogen(data, namlst)
 
   data%id_sed_amm = 0 ; data%id_sed_nit = 0 ; data%id_sed_n2o = 0 ; data%id_sed_no2 = 0
   data%id_nitrf   = 0 ; data%id_denit   = 0 ; data%id_n2op    = 0 ; data%id_anammox = 0
-  data%id_dnra    = 0 ; data%id_atm_n2o = 0 ; data%id_atm_dep = 0
+  data%id_dnra    = 0 ; data%id_atm_n2o = 0 ; data%id_atm_dep = 0 ; data%id_n2ocons = 0
 
    !---------------------------------------------------------------------------+
    ! Register diagnostic variables
@@ -375,6 +390,9 @@ SUBROUTINE aed_define_nitrogen(data, namlst)
     data%id_anammox = aed_define_diag_variable('anammox','mmol N/m3/d','anammox rate')
     data%id_dnra    = aed_define_diag_variable('dnra','mmol N/m3/d','dnra rate')
     IF( simN2O>0 )data%id_n2op    = aed_define_diag_variable('n2oprod','mmol N/m3/d','n2o prod rate')
+    !# N2O reduced to N2 (simN2O = 1; with simN2O = 2 this step is aed_organic_matter's OGM_n2o_denit)
+    IF( simN2O==1 .AND. diag_level>9 ) &
+       data%id_n2ocons = aed_define_diag_variable('n2ocons','mmol N/m3/d','n2o consumption to N2 rate')
 
     IF( simN2O>0 ) THEN
      data%id_atm_n2o = aed_define_sheet_diag_variable('n2o_atm','mmol N/m2/d','n2o atmospheric flux', surf=.TRUE.)
@@ -391,6 +409,7 @@ SUBROUTINE aed_define_nitrogen(data, namlst)
    IF( simWetDeposition ) data%id_e_rain  = aed_locate_sheet_global('rain')
    IF( simN2O>0 )         data%id_wind    = aed_locate_sheet_global('wind_speed')
    IF( simN2O>0 )         data%id_e_depth = aed_locate_global('layer_ht')
+   IF( simN2O>0 )         data%id_tstep   = aed_locate_sheet_global('timestep')
    IF( simN2O>0 )         data%id_cell_vel= aed_locate_global('cell_vel')! needed for k600
   !IF( simN2O>0 )         data%id_E_tau   = aed_locate_global('taub')    ! tau to be converted to velocity
   !IF( simN2O>0 )         data%id_E_dens  = aed_locate_global('density') ! density needed for tau-vel
@@ -463,7 +482,9 @@ SUBROUTINE aed_calculate_nitrogen(data,column,layer_idx)
      nitratation        = data%Rno2o2 * no2*oxy
      ammonium_oxidation = data%Rnh4o2 * amm*oxy
      nitritation        = data%Rnh4o2 * amm*oxy * oxy/(data%Kpart_ammox+oxy)
-     nitrousation       = data%Rnh4o2 * amm*oxy * data%Kpart_ammox/(data%Kpart_ammox+oxy) * 0.5
+     !# N2O is in mmol N: the NH4-N not oxidised to NO2 all ends in N2O (2 NH4 -> N2O),
+     !# so no factor 0.5 here (it discarded half of that N, and O2 is charged per N)
+     nitrousation       = data%Rnh4o2 * amm*oxy * data%Kpart_ammox/(data%Kpart_ammox+oxy)
      deammonification   = data%Rnh4no2* no2*amm * data%Kin_deamm/(data%Kin_deamm+oxy)
 
     !IF( data%simNitrfpH ) nitrousation = nitrousation * NitrfpHFunction(pH)  ! Ask Dan
@@ -521,7 +542,9 @@ SUBROUTINE aed_calculate_nitrogen(data,column,layer_idx)
        denit_n2o_prod = 0.5 * denitrification    !* Xnc
        denit_n2o_cons = data%Rn2o * n2o * exp(-oxy/Kn2oc)
        nit_n2o_prod   = zero_
-       IF(oxy>Knev) nit_n2o_prod = ((aa/oxy)+bb)*nitrification
+       !# the N2O yield of nitrification (Nevison) is part of the oxidised NH4-N, so it is
+       !# taken from the nitrate produced below; the fit is negative above O2 = -aa/bb
+       IF(oxy>Knev) nit_n2o_prod = MAX(zero_, ((aa/oxy)+bb)*nitrification)
        !IF(oxy>Knev) nit_n2o_prod = ((aa/oxy)+bb)*remin*Xnc
      ENDIF
 
@@ -545,6 +568,8 @@ SUBROUTINE aed_calculate_nitrogen(data,column,layer_idx)
      _FLUX_VAR_(data%id_nox) = _FLUX_VAR_(data%id_nox) &
                              + nitrification - denitrification - (1.32/2.32)*anammox - dnra
      IF( data%simN2O==1 ) &
+       _FLUX_VAR_(data%id_nox) = _FLUX_VAR_(data%id_nox) - nit_n2o_prod
+     IF( data%simN2O==1 ) &
        _FLUX_VAR_(data%id_n2o) = _FLUX_VAR_(data%id_n2o)  &
                              +  (denit_n2o_prod - denit_n2o_cons + nit_n2o_prod)
 
@@ -560,6 +585,7 @@ SUBROUTINE aed_calculate_nitrogen(data,column,layer_idx)
      IF (data%id_dnra>0)    _DIAG_VAR_(data%id_dnra)    = dnra * secs_per_day
      IF( data%simN2O==1 ) THEN
        IF (data%id_n2op>0) _DIAG_VAR_(data%id_n2op) = (denit_n2o_prod + nit_n2o_prod) * secs_per_day
+       IF (data%id_n2ocons>0) _DIAG_VAR_(data%id_n2ocons) = denit_n2o_cons * secs_per_day
      ENDIF
 
    ENDIF
@@ -629,7 +655,9 @@ SUBROUTINE aed_calculate_surface_nitrogen(data,column,layer_idx)
 
      !-----------------------------------------------
      ! Get the N2O flux:    [ mmol/m2/s = m/s * mmol/m3 ]
-     n2o_atm_flux = kn2o_trans * (n2o - Cn2o_air) * f_pres
+     !# outgassing flux, relaxed exactly over the step (no overshoot)
+     n2o_atm_flux = -aed_gas_exchange(kn2o_trans*f_pres, Cn2o_air, n2o,          &
+                          _STATE_VAR_(data%id_E_depth), _STATE_VAR_S_(data%id_tstep))
 
      !-----------------------------------------------
      ! Set surface exchange value (mmmol/m2/s) for AED ODE solution.
@@ -928,9 +956,16 @@ FUNCTION NitrfpHFunction(pH) RESULT(limitation)
 
    ! pH is greater than the upper bound of the optimum region
    IF(pH > NITpHOptMax) THEN
+     ! FIX 2026-08-29: the normalising denominator was (NITpHOptMax)^2. The
+     ! numerator evaluates to (NITpHOptMax-NITpHTolMax)^2 at pH=NITpHOptMax, so
+     ! the correct denominator is (NITpHOptMax-NITpHTolMax)^2 - that makes the
+     ! curve equal exactly 1.0 at the top of the optimum band and 0.0 at the
+     ! tolerance limit. With OptMax=7.9/TolMax=9.0 the old form dropped
+     ! discontinuously from 1.0 to 1.21/62.41 = 0.0194 the instant pH exceeded
+     ! 7.9. The low-pH branch below is already normalised this way.
      limitation = (-pH*pH+2.0*NITpHOptMax*pH -                                 &
                   2.0*NITpHOptMax*NITpHTolMax+NITpHTolMax*NITpHTolMax)/        &
-                                         ((NITpHOptMax)*(NITpHOptMax))
+                       ((NITpHOptMax-NITpHTolMax)*(NITpHOptMax-NITpHTolMax))
    ENDIF
 
    ! pH is less than the lower bound of optimum region (NITpHOptMin)

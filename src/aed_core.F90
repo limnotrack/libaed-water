@@ -40,7 +40,7 @@ MODULE aed_core
 
    PUBLIC aed_model_data_t, aed_variable_t, aed_column_t, aed_ptm_t
    PUBLIC aed_init_core, aed_core_status
-   PUBLIC aed_get_var, aed_get_var_idx
+   PUBLIC aed_get_var, aed_get_var_idx, aed_find_variable
    PUBLIC aed_set_current_model, aed_set_prefix
    PUBLIC aed_is_const_var, aed_set_const_var
 
@@ -53,8 +53,13 @@ MODULE aed_core
    PUBLIC aed_locate_global,           aed_locate_sheet_global
 
    PUBLIC host_has_cell_vel
+   PUBLIC aed_define_deposition, aed_define_deposition_name
+   PUBLIC aed_n_deposition_routes, aed_get_deposition_route
+   PUBLIC aed_set_host_deposition, aed_host_deposition
    PUBLIC aed_set_timestep, aed_get_timestep
    PUBLIC zero_, one_, nan_, misval_, secs_per_day
+   PUBLIC aed_ptm_dt_days
+   PUBLIC aed_ptm_n_reserved, aed_set_ptm_reserved
    PUBLIC model_list, last_model, aed_thread, aed_n_threads
    PUBLIC n_aed_models
 
@@ -127,6 +132,10 @@ MODULE aed_core
       LOGICAL           :: top, bot
       LOGICAL           :: const
       LOGICAL           :: zavg, zavg_req
+      !# bflux: a layer diagnostic set as a benthic flux per m2 divided by the
+      !# layer height (e.g. OXY_oxy_dsfv). With sediment zones the host rebuilds
+      !# it from the zone fluxes with its own bed/volume geometry (K88).
+      LOGICAL           :: bflux = .FALSE.
       INTEGER           :: particle_link
       INTEGER           :: index
       LOGICAL           :: rezero
@@ -178,6 +187,20 @@ MODULE aed_core
 
    LOGICAL :: host_has_cell_vel = .false.
 
+   !# Deposition routes (K19, K20). A module declares that the mass of a water
+   !# state variable that the host's settling deposits on the bed goes to a
+   !# benthic (sheet) state variable, times a scale (e.g. phytoplankton C x N:C
+   !# into a sediment N pool). A host that delivers deposition says so with
+   !# aed_set_host_deposition(.TRUE.); modules then must not add their own
+   !# estimate of it.
+   TYPE aed_dep_route_t
+      INTEGER  :: src = 0, tgt = 0
+      AED_REAL :: scale = 1.
+   END TYPE aed_dep_route_t
+   TYPE(aed_dep_route_t),DIMENSION(:),ALLOCATABLE :: dep_routes
+   INTEGER :: n_dep_routes = 0
+   LOGICAL :: host_deposition = .FALSE.
+
    !# Host timestep (seconds) and substep split factor, set by the API once the
    !# host has handed over its environment. Not available during define.
    AED_REAL :: host_timestep = -1.
@@ -210,8 +233,44 @@ MODULE aed_core
    INTEGER,PARAMETER  :: V_STATE = 1, V_DIAGNOSTIC = 2, V_EXTERNAL = 3, V_PARTICLE = 4
 
    INTEGER            :: ptm_counter = 0
+
+   !# Length of the biological timestep the particle model is currently being
+   !# advanced over, in DAYS. Published by aed_calculate_particles from the
+   !# value the host passes in, and read by the particle BGC models (see dtdays
+   !# in aed_phyto_abm) instead of a hardcoded assumption. This matters because
+   !# the host may call the particle model once per host step OR once per
+   !# split_factor sub-step; the physiology must advance by whichever interval
+   !# it is actually being handed, or growth scales with split_factor.
+   !# The 1/24 default reproduces the previous hardcoded hourly value for any
+   !# host that does not supply one.
+   AED_REAL           :: aed_ptm_dt_days = 1.0/24.0
+
+   !# Particle slots 1..aed_ptm_n_reserved are owned by the host for the whole run
+   !# and are never allocated to a newly created particle (see next_free_slot in
+   !# aed_phyto_abm). A host sets this when its particle identities must survive
+   !# independently of the biology - ELCOM's drifters, for instance, exist even with
+   !# do_particle_bgc = .FALSE., carry their own physical state, and have NetCDF
+   !# records indexed by drifter number, so re-issuing a drifter's slot after its
+   !# phytoplankton died would silently swap that drifter's biology for a stranger's.
+   !# 0 (the default) leaves the whole pool allocatable, which is GLM's behaviour.
+   INTEGER            :: aed_ptm_n_reserved = 0
 !===============================================================================
 CONTAINS
+
+
+!###############################################################################
+SUBROUTINE aed_set_ptm_reserved(n)
+!-------------------------------------------------------------------------------
+! Reserve the first n particle slots for the host (see aed_ptm_n_reserved above).
+!-------------------------------------------------------------------------------
+!ARGUMENTS
+   INTEGER,INTENT(in) :: n
+!
+!-------------------------------------------------------------------------------
+!BEGIN
+   aed_ptm_n_reserved = MAX(n, 0)
+END SUBROUTINE aed_set_ptm_reserved
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 !###############################################################################
@@ -655,6 +714,7 @@ FUNCTION aed_create_variable(name, longname, units, place) RESULT(ret)
       all_vars(ret)%found = .false.
       all_vars(ret)%zavg = .false.
       all_vars(ret)%zavg_req = .false.
+      all_vars(ret)%bflux = .false.
       all_vars(ret)%top = .false.
       all_vars(ret)%bot = .false.
       all_vars(ret)%particle_link = 0
@@ -729,11 +789,12 @@ END FUNCTION aed_define_sheet_variable
 
 
 !###############################################################################
-FUNCTION aed_define_diag_variable(name, units, longname, zavg, rezero, output) RESULT(ret)
+FUNCTION aed_define_diag_variable(name, units, longname, zavg, rezero, output, bflux) RESULT(ret)
 !-------------------------------------------------------------------------------
 !ARGUMENTS
    CHARACTER(*),INTENT(in) :: name, longname, units
    LOGICAL,INTENT(in),OPTIONAL :: zavg
+   LOGICAL,INTENT(in),OPTIONAL :: bflux  !# benthic flux / layer height (see aed_variable_t)
    LOGICAL,INTENT(in),OPTIONAL :: rezero !By default, diagnostics get zeroed each timestep,
    										 !use this flag to not rezero
    LOGICAL,INTENT(in),OPTIONAL :: output !Default .TRUE.; .FALSE. marks a diagnostic
@@ -768,6 +829,8 @@ FUNCTION aed_define_diag_variable(name, units, longname, zavg, rezero, output) R
    ENDIF
 
    IF ( PRESENT(output) ) all_vars(ret)%output = output
+   all_vars(ret)%bflux = .FALSE.
+   IF ( PRESENT(bflux) ) all_vars(ret)%bflux = bflux
 END FUNCTION aed_define_diag_variable
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
@@ -1390,5 +1453,85 @@ SUBROUTINE aed_delete(data)
 END SUBROUTINE aed_delete
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
+
+
+!###############################################################################
+SUBROUTINE aed_define_deposition(src, tgt, scale)
+!-------------------------------------------------------------------------------
+! The mass of water variable src that settles onto the bed goes to benthic
+! variable tgt (both AED variable ids), times scale (default 1).
+!-------------------------------------------------------------------------------
+!ARGUMENTS
+   INTEGER,INTENT(in) :: src, tgt
+   AED_REAL,INTENT(in),OPTIONAL :: scale
+!
+!LOCALS
+   TYPE(aed_dep_route_t),DIMENSION(:),ALLOCATABLE :: tmp
+!-------------------------------------------------------------------------------
+!BEGIN
+   IF ( src <= 0 .OR. tgt <= 0 ) RETURN
+   IF ( .NOT. ALLOCATED(dep_routes) ) ALLOCATE(dep_routes(16))
+   IF ( n_dep_routes == SIZE(dep_routes) ) THEN
+      ALLOCATE(tmp(2*SIZE(dep_routes))) ; tmp(1:n_dep_routes) = dep_routes(1:n_dep_routes)
+      CALL MOVE_ALLOC(tmp, dep_routes)
+   ENDIF
+   n_dep_routes = n_dep_routes + 1
+   dep_routes(n_dep_routes)%src = src
+   dep_routes(n_dep_routes)%tgt = tgt
+   dep_routes(n_dep_routes)%scale = one_
+   IF ( PRESENT(scale) ) dep_routes(n_dep_routes)%scale = scale
+END SUBROUTINE aed_define_deposition
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+SUBROUTINE aed_define_deposition_name(src, tgt_name, scale)
+!-------------------------------------------------------------------------------
+! As aed_define_deposition, with the target given by name; no route is made if
+! no such variable has been defined (e.g. the sediment pools are switched off).
+!-------------------------------------------------------------------------------
+!ARGUMENTS
+   INTEGER,INTENT(in) :: src
+   CHARACTER(*),INTENT(in) :: tgt_name
+   AED_REAL,INTENT(in),OPTIONAL :: scale
+!-------------------------------------------------------------------------------
+!BEGIN
+   CALL aed_define_deposition(src, aed_find_variable(tgt_name), scale)
+END SUBROUTINE aed_define_deposition_name
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+INTEGER FUNCTION aed_n_deposition_routes()
+   aed_n_deposition_routes = n_dep_routes
+END FUNCTION aed_n_deposition_routes
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+SUBROUTINE aed_get_deposition_route(i, src, tgt, scale)
+!ARGUMENTS
+   INTEGER,INTENT(in)   :: i
+   INTEGER,INTENT(out)  :: src, tgt
+   AED_REAL,INTENT(out) :: scale
+!BEGIN
+   src = dep_routes(i)%src ; tgt = dep_routes(i)%tgt ; scale = dep_routes(i)%scale
+END SUBROUTINE aed_get_deposition_route
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+SUBROUTINE aed_set_host_deposition(on)
+   LOGICAL,INTENT(in) :: on
+   host_deposition = on
+END SUBROUTINE aed_set_host_deposition
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+!###############################################################################
+LOGICAL FUNCTION aed_host_deposition()
+   aed_host_deposition = host_deposition
+END FUNCTION aed_host_deposition
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 END MODULE aed_core

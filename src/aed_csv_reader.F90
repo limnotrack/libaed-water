@@ -401,15 +401,22 @@ FUNCTION extract_double(sym) RESULT(num)
 !LOCALS
     DOUBLE PRECISION  :: num
     CHARACTER(len=80) :: tbuf
-    INTEGER           :: i
+    INTEGER           :: i, n
 !
 !-------------------------------------------------------------------------------
 !BEGIN
     IF ( sym%length > 0 ) THEN
-       DO i=1,sym%length
+       ! Clamp the copy to LEN(tbuf). This reader has no comment syntax, so a trailing
+       ! annotation on a CSV row lands inside the last field - e.g. the parameter files
+       ! here carry rows like  'n0', 285176600000 ! 1 ! 5000000000000  - and once such a
+       ! field exceeds 80 characters the loop below writes past the end of tbuf and
+       ! corrupts the stack frame. Truncating is safe: the list-directed read takes only
+       ! the first token, so the annotation was never going to be parsed anyway.
+       n = MIN(sym%length, LEN(tbuf))
+       DO i=1,n
           tbuf(i:i)=sym%sym(i)
        ENDDO
-       tbuf(sym%length+1:)=' '
+       tbuf(n+1:)=' '
 
        read(tbuf,*) num
     ELSE
@@ -430,15 +437,16 @@ FUNCTION extract_integer(sym) RESULT(num)
 !LOCALS
     INTEGER           :: num
     CHARACTER(len=80) :: tbuf
-    INTEGER           :: i
+    INTEGER           :: i, n
 !
 !-------------------------------------------------------------------------------
 !BEGIN
     IF ( sym%length > 0 ) THEN
-       DO i=1,sym%length
+       n = MIN(sym%length, LEN(tbuf))   ! see extract_double: clamp, else long fields overrun tbuf
+       DO i=1,n
           tbuf(i:i)=sym%sym(i)
        ENDDO
-       tbuf(sym%length+1:)=' '
+       tbuf(n+1:)=' '
 
        read(tbuf,*) num
     ELSE
@@ -459,19 +467,25 @@ FUNCTION extract_logical(sym) RESULT(res)
 !LOCALS
     LOGICAL           :: res
     CHARACTER(len=80) :: tbuf
-    INTEGER           :: i
+    INTEGER           :: i, n
 !
 !-------------------------------------------------------------------------------
 !BEGIN
     IF ( sym%length > 0 ) THEN
-       DO i=1,sym%length
+       n = MIN(sym%length, LEN(tbuf))   ! see extract_double: clamp, else long fields overrun tbuf
+       DO i=1,n
           tbuf(i:i)=sym%sym(i)
        ENDDO
-       tbuf(sym%length+1:)=' '
+       tbuf(n+1:)=' '
 
-       res = .FALSE.
-    ELSE
+       ! The two branches were inverted: a populated symbol was copied into tbuf and then
+       ! unconditionally returned .FALSE. (so every value in the file read as false), while
+       ! an EMPTY symbol fell through to a read() of an uninitialised tbuf. Unlike the three
+       ! neighbouring extractors this one has no caller today, which is why it went unnoticed
+       ! - but it is a trap for the first LOGICAL column added to a parameter CSV.
        read(tbuf,*) res
+    ELSE
+       res = .FALSE.
     ENDIF
 END FUNCTION extract_logical
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -487,15 +501,18 @@ FUNCTION extract_string(sym) RESULT(str)
 
 !LOCALS
     CHARACTER(len=20) :: str
-    INTEGER           :: i
+    INTEGER           :: i, n
 !
 !-------------------------------------------------------------------------------
 !BEGIN
     IF ( sym%length > 0 ) THEN
-       DO i=1,sym%length
+       ! See extract_double. Note str is only 20 characters, so this one overran on any
+       ! field longer than 20 - a much lower threshold than the other three.
+       n = MIN(sym%length, LEN(str))
+       DO i=1,n
           str(i:i)=sym%sym(i)
        ENDDO
-       str(sym%length+1:)=' '
+       str(n+1:)=' '
     ELSE
        str = ''
     ENDIF
@@ -512,12 +529,17 @@ SUBROUTINE copy_name(sym, name)
    CHARACTER(len=*),INTENT(out) :: name
 !
 !LOCALS
-   INTEGER i
+   INTEGER i, n
 !
 !-------------------------------------------------------------------------------
 !BEGIN
-   name = t_strs(sym%length)
-   DO i=1,sym%length
+   !# 2026-07 fix: was `name = t_strs(sym%length)`, an out-of-bounds read - t_strs is
+   !# declared (0:32) but sym%length comes from a 2048-byte line buffer, so any CSV
+   !# field or header longer than 32 chars indexed past the end. Blanking is exactly
+   !# equivalent (Fortran blank-pads a character assignment) and needs no subscript.
+   name = ''
+   n = MIN(sym%length, LEN(name))   !# see extract_double: name is the caller's buffer,
+   DO i=1,n                         !# previously written past its end for long symbols.
       name(i:i) = sym%sym(i)
    ENDDO
 END SUBROUTINE copy_name
@@ -629,10 +651,16 @@ INTEGER FUNCTION aed_rcsv_open(fname, ncols)
       ENDIF
    ENDDO
    IF ( unit == 0 ) THEN
+      !# 2026-07 fix: end_parse() DEALLOCATEs aedr, but control then fell through to
+      !# `aedr%n_cols = ncols` below - a write through a freed pointer. It also returned
+      !# unit == 0, which is not the -1 error code callers test for. Fail explicitly.
       res = end_parse(aedr)
-   ELSE
-      ncols = scan_rcsv_file(aedr)
+      print*, "aed_rcsv_open: no free CSV reader slots (max 10) for '",TRIM(fname),"'"
+      aed_rcsv_open = -1
+      RETURN
    ENDIF
+
+   ncols = scan_rcsv_file(aedr)
 
 ! print*,"file ", fname, " had ", ncols, " cols"
    aedr%n_cols = ncols
@@ -672,10 +700,15 @@ INTEGER FUNCTION aed_csv_read_header(fname, names, ncols)
       ENDIF
    ENDDO
    IF ( unit == 0 ) THEN
+      !# 2026-07 fix: see aed_rcsv_open - end_parse() DEALLOCATEs aedr and control fell
+      !# through to `aedr%n_cols = ncols`, a write through a freed pointer.
       res = end_parse(aedr)
-   ELSE
-      ncols = scan_csv_header(aedr, names)
+      print*, "aed_csv_read_header: no free CSV reader slots (max 10) for '",TRIM(fname),"'"
+      aed_csv_read_header = -1
+      RETURN
    ENDIF
+
+   ncols = scan_csv_header(aedr, names)
 
    aedr%n_cols = ncols
    aed_csv_read_header = unit

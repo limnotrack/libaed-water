@@ -59,7 +59,7 @@ MODULE aed_carbon
 !-------------------------------------------------------------------------------
    USE aed_core
 
-   USE aed_util,  ONLY: aed_gas_piston_velocity
+   USE aed_util,  ONLY: aed_gas_piston_velocity, aed_gas_exchange
 
    IMPLICIT NONE
 
@@ -73,7 +73,7 @@ MODULE aed_carbon
       INTEGER  :: id_Fsed_dic, id_Fsed_ch4, id_Fsed_ch4_ebb, id_Fstm_ch4
       INTEGER  :: id_Fsed_dic_dry, id_Fsed_ch4_dry, id_Fsed_ch4_ebb_dry
       INTEGER  :: id_temp, id_salt
-      INTEGER  :: id_wind, id_windr, id_vel, id_depth
+      INTEGER  :: id_wind, id_windr, id_vel, id_depth, id_tstep
       INTEGER  :: id_par, id_extc, id_dz, id_tau, id_atemp
       INTEGER  :: id_ch4ox, id_pco2
       INTEGER  :: id_sed_dic, id_sed_ch4, id_sed_ch4_ebb, id_sed_ch4_ebb_3d
@@ -238,7 +238,7 @@ SUBROUTINE aed_define_carbon(data, namlst)
    read(namlst,nml=aed_carbon,iostat=status)
    IF (status /= 0) THEN
       print *,'Error reading namelist for &aed_carbon'
-      STOP
+      ERROR STOP 1
    ENDIF
 
    !# Update configuration flags after options read in
@@ -384,7 +384,7 @@ SUBROUTINE aed_define_carbon(data, namlst)
                             'mmol C/m2/d', 'CH4 exchange across atm/water interface', surf=.TRUE.)
          IF ( data%simCH4ebb ) THEN
             data%id_sed_ch4_ebb_3d = aed_define_diag_variable('ch4_ebb_dsfv','mmol C/m3/d', &
-                            'CH4 ebullition release rate', zavg = .TRUE.)
+                            'CH4 ebullition release rate', zavg = .TRUE., bflux = .TRUE.)
             data%id_ch4_ebb_df = aed_define_diag_variable('ch4_ebb_dis','mmol C/m3/d', &
                             'CH4 bubble dissolution rate', zavg= .TRUE.)
             data%id_sed_ch4_ebb = aed_define_sheet_diag_variable('ch4_ebb_dsf','mmol C/m2/d', &
@@ -407,6 +407,7 @@ SUBROUTINE aed_define_carbon(data, namlst)
    data%id_extc = aed_locate_global('extc_coef')
    data%id_par  = aed_locate_global('par')
    data%id_dz   = aed_locate_global('layer_ht')
+   data%id_tstep= aed_locate_sheet_global('timestep')   ! for exact air-water relaxation
    data%id_vel  = aed_locate_global('cell_vel')           ! needed for k600
    data%id_depth= aed_locate_sheet_global('col_depth')
 !   data%id_depth= aed_locate_global('depth')
@@ -457,9 +458,10 @@ SUBROUTINE aed_calculate_carbon(data,column,layer_idx)
       _FLUX_VAR_(data%id_dic) = _FLUX_VAR_(data%id_dic) + (ch4*ch4oxidation)
       _FLUX_VAR_(data%id_ch4) = _FLUX_VAR_(data%id_ch4) + (-ch4*ch4oxidation)
 
-      !# If a linked oxygen pool is present, take oxidation from it assume 1:1 stoichometry
+      !# If a linked oxygen pool is present, take oxidation from it:
+      !# CH4 + 2 O2 -> CO2 + 2 H2O, i.e. 2 mol O2 per mol CH4 oxidised
       IF (data%use_oxy) THEN
-         _FLUX_VAR_(data%id_oxy) = _FLUX_VAR_(data%id_oxy) - ch4*ch4oxidation  ! *(32./12.) not mass
+         _FLUX_VAR_(data%id_oxy) = _FLUX_VAR_(data%id_oxy) - 2.0*ch4*ch4oxidation
       ENDIF
 
       !# Export diagnostic variables
@@ -483,6 +485,7 @@ SUBROUTINE aed_calculate_surface_carbon(data,column,layer_idx)
 !LOCALS
    ! Environment
    AED_REAL :: temp, salt, wind, S, T, depth, vel
+   AED_REAL :: dt, h, co2aq, co2eq, alpha
 
    ! State
    AED_REAL :: dic,pHin,ch4,talk = 0.,TCO2 = 0.
@@ -515,6 +518,8 @@ SUBROUTINE aed_calculate_surface_carbon(data,column,layer_idx)
    temp   = _STATE_VAR_(data%id_temp)   ! Temperature (degrees Celsius)
    salt   = _STATE_VAR_(data%id_salt)   ! Salinity (psu)
    depth  = MAX( _STATE_VAR_S_(data%id_depth), one_ )
+   dt     = _STATE_VAR_S_(data%id_tstep)   ! step length and surface layer thickness for
+   h      = _STATE_VAR_(data%id_dz)        ! the exact air-water relaxation
    IF (data%id_vel > 0 ) THEN
       vel = _STATE_VAR_(data%id_vel)
    ELSE
@@ -666,7 +671,14 @@ SUBROUTINE aed_calculate_surface_carbon(data,column,layer_idx)
       !  pCO2a = 367e-6 atm (Keeling & Wharf, 1999)
       !  mmol/m2/s = m/s * mmol/m3/atm * atm
       !  FCO2 = - kCO2 * Ko*1e6 * ((pCO2 * 1e-6) - data%atm_co2) ! dCO2/dt
-      FCO2 = kCO2 * (1e6*Ko) * (pCO2 - data%atm_co2)
+      !# Outgassing flux of CO2 (+ve out of the water). The exchange relaxes
+      !# dissolved CO2 towards equilibrium; it changes DIC, of which CO2 is the
+      !# fraction alpha, so integrate exactly over the step with that factor
+      !# (= kCO2*(CO2 - CO2_eq) for small steps)
+      co2aq = (1e6*Ko) * pCO2
+      co2eq = (1e6*Ko) * data%atm_co2
+      alpha = one_ ; IF ( dic > zero_ ) alpha = co2aq / dic
+      FCO2 = -aed_gas_exchange(kCO2, co2eq, co2aq, h, dt, alpha)
 
       !-------------------------------------------------------------------------
       !# Transfer surface exchange value to AED (mmmol/m2/s) converted by driver
@@ -709,7 +721,8 @@ SUBROUTINE aed_calculate_surface_carbon(data,column,layer_idx)
       CH4solub = exp(logC) * 1e-3
 
       !# Now compute methane atm flux  (mmol/m2/s = m/s * mmol/m3)
-      FCH4 = kCH4 *  (ch4 - CH4solub)
+      !# Outgassing flux of CH4, relaxed exactly over the step (no overshoot)
+      FCH4 = -aed_gas_exchange(kCH4, CH4solub, ch4, h, dt)
 
       !----------------------------------------------------------------------------
       !# Transfer surface exchange value to AED (mmmol/m2) converted by driver.

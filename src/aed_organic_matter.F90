@@ -97,7 +97,7 @@ MODULE aed_organic_matter
       INTEGER  :: id_swi_poc,    id_swi_doc,     id_swi_poc_r
       INTEGER  :: id_docr_miner, id_donr_miner,  id_dopr_miner,  id_cpom_bdown
       INTEGER  :: id_sed_toc,    id_sed_ton,     id_sed_top,     id_sedomfr
-      INTEGER  :: id_l_resus,    id_denit,       id_anaerobic
+      INTEGER  :: id_l_resus,    id_denit,       id_anaerobic, id_denitrous
       INTEGER  :: id_pom_vvel,   id_cpom_vvel
       INTEGER  :: id_bod,        id_cdom
       INTEGER  :: id_photolysis, id_floc
@@ -336,7 +336,7 @@ SUBROUTINE aed_define_organic_matter(data, namlst)
 
    ! Read the namelist
    read(namlst,nml=aed_organic_matter,iostat=status)
-   IF (status /= 0) STOP 'Error reading namelist aed_organic_matter'
+   IF (status /= 0) ERROR STOP 'Error reading namelist aed_organic_matter'
 
    IF( extra_diag )   diag_level = 10           ! legacy use of extra_diag
 
@@ -492,6 +492,17 @@ SUBROUTINE aed_define_organic_matter(data, namlst)
                                                   'sediment pop mass',         &
                                                   initial_sedom,               &
                                                   minimum=-1e10)
+
+     !# What the host's settling deposits on the bed goes to these pools (K19).
+     !# Used only by hosts that deliver deposition (aed_host_deposition()).
+     CALL aed_define_deposition(data%id_poc, data%id_sed_poc)
+     CALL aed_define_deposition(data%id_pon, data%id_sed_pon)
+     CALL aed_define_deposition(data%id_pop, data%id_sed_pop)
+     IF ( data%id_cpom > 0 ) THEN
+        CALL aed_define_deposition(data%id_cpom, data%id_sed_poc)
+        CALL aed_define_deposition(data%id_cpom, data%id_sed_pon, data%X_cpom_n)
+        CALL aed_define_deposition(data%id_cpom, data%id_sed_pop, data%X_cpom_p)
+     ENDIF
    ENDIF
 
    ! Register external (linked) state variable dependencies
@@ -512,13 +523,21 @@ SUBROUTINE aed_define_organic_matter(data, namlst)
        IF (data%use_no2) data%id_no2 = aed_locate_variable(dom_miner_no2_reactant_var)
        data%use_n2o = dom_miner_n2o_reactant_var .NE. ''
        IF (data%use_n2o) data%id_n2o = aed_locate_variable(dom_miner_n2o_reactant_var)
+       !# the complex pathway writes NO3, NO2, N2O and NH4 fluxes: all must be linked
+       IF ( .NOT. (data%use_nit .AND. data%use_no2 .AND. data%use_n2o .AND. don_miner_product_variable .NE. '') ) &
+          STOP 'aed_organic_matter: simDenitrification = 2 needs dom_miner_nit_reactant_var, '// &
+               'dom_miner_no2_reactant_var, dom_miner_n2o_reactant_var and don_miner_product_variable'
    ENDIF
    IF( simFeReduction==1 ) THEN
      data%use_fe3 = dom_miner_fe3_reactant_var .NE. ''
      IF (data%use_fe3) THEN
        data%id_fe = aed_locate_variable(dom_miner_fe3_reactant_var)
      ELSE
-       simFeReduction = 0
+       ! FIX 2026-08-29: this assigned the LOCAL namelist variable, but
+       ! data%simFeReduction was already copied from it above (~L406), so the
+       ! auto-disable had no effect and aed_calculate_om still entered the
+       ! Fe-reduction branch with an unset data%id_fe. Set the stored flag.
+       data%simFeReduction = 0
      ENDIF
    ELSE
      data%use_fe3 = .FALSE.
@@ -528,7 +547,9 @@ SUBROUTINE aed_define_organic_matter(data, namlst)
      IF (data%use_so4) THEN
        data%id_so4 = aed_locate_variable(dom_miner_so4_reactant_var)
      ELSE
-       simSO4Reduction = 0
+       ! FIX 2026-08-29: as above - the local was cleared, not the stored copy
+       ! data%simSO4Reduction, so the auto-disable never took effect.
+       data%simSO4Reduction = 0
      ENDIF
    ELSE
      data%use_so4 = .FALSE.
@@ -538,7 +559,9 @@ SUBROUTINE aed_define_organic_matter(data, namlst)
      IF (data%use_ch4) THEN
        data%id_ch4 = aed_locate_variable(dom_miner_ch4_reactant_var)
      ELSE
-       simMethanogenesis = 0
+       ! FIX 2026-08-29: as above - the local was cleared, not the stored copy
+       ! data%simMethanogenesis, so the auto-disable never took effect.
+       data%simMethanogenesis = 0
      ENDIF
    ELSE
      data%use_ch4 = .FALSE.
@@ -602,10 +625,23 @@ SUBROUTINE aed_define_organic_matter(data, namlst)
 
 
    !-- resuspension link variable
+   !# 2026-09-08: zero id_sedomfr HERE, before the registration, now that the blanket zeroing
+   !# further down no longer touches it. The derived type declares it with no default initialiser,
+   !# so without this it would hold garbage on every path that does not register it.
+   data%id_sedomfr = 0
    IF ( resuspension>0 .AND. .NOT.resus_link .EQ. '' ) THEN
       data%id_l_resus  = aed_locate_sheet_variable(TRIM(resus_link)) ! ('TRC_resus')
       IF ( resuspension>1 ) THEN
-        data%id_sedomfr  = aed_define_sheet_diag_variable('om_sed_frac','w/w',  'Sediment OM fraction')
+        !# 2026-09-08: refuse resuspension=2 rather than run it silently wrong. The diagnostic
+        !# 'om_sed_frac' registered here is NEVER WRITTEN anywhere in the tree - a whole-repo search
+        !# finds only this line - so even with the index bug fixed, sedomfr would read back as 0 and
+        !# every resuspension flux (poc/pon/pop) would be identically zero while appearing enabled.
+        !# Re-enable this mode only once something actually supplies the sediment OM fraction.
+        print *,'ERROR: aed_organic_matter resuspension=2 requires a source for om_sed_frac,'
+        print *,'       which nothing in this build writes. Use resuspension=1 with sedimentOMfrac.'
+        !# 2026-09-08: STOP 1, not bare STOP - a bare STOP exits with status 0 and a fatal
+        !# configuration error then looks like a clean run.
+        STOP 1
       ENDIF
    ELSE
       data%id_l_resus = 0
@@ -625,7 +661,7 @@ SUBROUTINE aed_define_organic_matter(data, namlst)
    data%id_swi_don    = 0 ; data%id_swi_pop    = 0 ; data%id_swi_dop    = 0
    data%id_poc_miner  = 0 ; data%id_doc_miner  = 0 ; data%id_pon_miner  = 0
    data%id_don_miner  = 0 ; data%id_pop_miner  = 0 ; data%id_dop_miner  = 0
-   data%id_denit      = 0 ; data%id_bod        = 0 ; data%id_photolysis = 0
+   data%id_denit      = 0 ; data%id_bod        = 0 ; data%id_photolysis = 0 ; data%id_denitrous = 0
    data%id_docr_miner = 0 ; data%id_donr_miner = 0 ; data%id_dopr_miner = 0
    data%id_cpom_bdown = 0 ; data%id_cdom       = 0 ; data%id_floc       = 0
    data%id_sed_toc    = 0 ; data%id_sed_ton    = 0 ; data%id_sed_top    = 0
@@ -656,6 +692,8 @@ SUBROUTINE aed_define_organic_matter(data, namlst)
      data%id_dop_miner= aed_define_diag_variable(      'dop_min'  ,'mmol P/m3/d','DOP mineralisation')
      data%id_anaerobic= aed_define_diag_variable('doc_anaerobic'  ,'mmol C/m3/d','anaerobic metabolism')
      data%id_denit    = aed_define_diag_variable(    'doc_denit'  ,'mmol C/m3/d','denitrification')
+     IF (simDenitrification==2) &
+        data%id_denitrous = aed_define_diag_variable('n2o_denit','mmol N/m3/d','N2O reduced to N2 (denitrousation)')
 
      IF (simRPools) THEN
         data%id_docr_miner = aed_define_diag_variable('docr_min'  ,'mmol C/m3/d','DOCR mineralisation')
@@ -935,15 +973,19 @@ SUBROUTINE aed_calculate_organic_matter(data,column,layer_idx)
        denitratation  = denitratation * doc_min_anaerobic/denitrification
        denitritation  = denitritation * doc_min_anaerobic/denitrification
        denitrousation = denitrousation * doc_min_anaerobic/denitrification
+       denitrification  = denitratation+denitritation+denitrousation
      ENDIF
      dnra                  =  denitritation * data%Kpart_denitrit/(data%Kpart_denitrit+no2)
-     nitrous_denitritation =  denitritation * no2/(data%Kpart_denitrit+no2) * 0.5
+     !# NO2 -> N2O conserves N (N2O is in mmol N): no factor 0.5, which discarded half
+     nitrous_denitritation =  denitritation * no2/(data%Kpart_denitrit+no2)
      ammonium_release      = (denitratation + denitritation + denitrousation) * MIN(don/MAX(doc,1e-2),one_) ! data%X_nc
 
      _FLUX_VAR_(data%id_nit) = _FLUX_VAR_(data%id_nit) - denitratation
      _FLUX_VAR_(data%id_no2) = _FLUX_VAR_(data%id_no2) + denitratation - denitritation
      _FLUX_VAR_(data%id_n2o) = _FLUX_VAR_(data%id_n2o) + nitrous_denitritation - denitrousation
-     _FLUX_VAR_(data%id_amm) = _FLUX_VAR_(data%id_amm) + dnra + ammonium_release
+     !# DON mineralisation releases its NH4 below, as in the other modes;
+     !# ammonium_release (an estimate of the same N) is no longer added on top
+     _FLUX_VAR_(data%id_amm) = _FLUX_VAR_(data%id_amm) + dnra
 
      fnit = data%K_nit/(data%K_nit+(nit+no2))
    ENDIF
@@ -968,7 +1010,9 @@ SUBROUTINE aed_calculate_organic_matter(data,column,layer_idx)
    IF( data%simMethanogenesis>0 ) THEN
      !# Methanogenesis : anaerobic breakdown, after all other pathways
      methanogenesis = doc_min_anaerobic * fso4 * ffe * fnit
-     _FLUX_VAR_(data%id_ch4) = _FLUX_VAR_(data%id_ch4) - methanogenesis  ! stoich
+     !# methanogenesis PRODUCES methane: 2 CH2O -> CH4 + CO2, so half of the
+     !# organic C mineralised this way goes to CH4 and half to DIC (below)
+     IF ( data%use_ch4 ) _FLUX_VAR_(data%id_ch4) = _FLUX_VAR_(data%id_ch4) + 0.5*methanogenesis
    ENDIF
    doc_min_anaerobic = doc_min_anaerobic - methanogenesis
 
@@ -976,13 +1020,15 @@ SUBROUTINE aed_calculate_organic_matter(data,column,layer_idx)
    ! Set temporal derivatives : PRODUCTS of mineralisation
    if (data%use_dic) THEN
       _FLUX_VAR_(data%id_dic) = _FLUX_VAR_(data%id_dic) + (doc_mineralisation)
+      !# the methane half of methanogenic mineralisation went to CH4, not DIC
+      IF ( data%simMethanogenesis>0 .AND. data%use_ch4 ) &
+         _FLUX_VAR_(data%id_dic) = _FLUX_VAR_(data%id_dic) - 0.5*methanogenesis
       IF ( data%simRPools ) _FLUX_VAR_(data%id_dic) =  &
                                     _FLUX_VAR_(data%id_dic) + photolysis*(1.-photo_fmin)
    ENDIF
    IF (data%use_amm) THEN
       ! NH4 released by DON mineralisation (if complex N model, this is also related to ammonium_release)
-      IF( data%simDenitrification==0 .OR. data%simDenitrification==1 ) &
-        _FLUX_VAR_(data%id_amm) = _FLUX_VAR_(data%id_amm) + (don_mineralisation)
+      _FLUX_VAR_(data%id_amm) = _FLUX_VAR_(data%id_amm) + (don_mineralisation)
       !IF( data%simDenitrification==2 ) & !MH needs balacing with Denit fraction , see aammonium_release above
       !  _FLUX_VAR_(data%id_amm) = _FLUX_VAR_(data%id_amm) + (don_mineralisation)
       IF ( data%simRPools )  &
@@ -1041,8 +1087,10 @@ SUBROUTINE aed_calculate_organic_matter(data,column,layer_idx)
      ! Anaerobic OM mineralisation
      _DIAG_VAR_(data%id_denit)     = denitrification*secs_per_day
      _DIAG_VAR_(data%id_anaerobic) = doc_min_anaerobic*secs_per_day
-     IF ( data%simDenitrification>1 ) &
-          _DIAG_VAR_(data%id_denit) = denitratation + denitritation + denitrousation
+     IF ( data%simDenitrification>1 ) THEN
+        _DIAG_VAR_(data%id_denit) = (denitratation + denitritation + denitrousation)*secs_per_day
+        IF (data%id_denitrous>0) _DIAG_VAR_(data%id_denitrous) = denitrousation*secs_per_day
+     ENDIF
    ENDIF
 
 END SUBROUTINE aed_calculate_organic_matter
@@ -1171,6 +1219,11 @@ SUBROUTINE aed_calculate_benthic_organic_matter(data,column,layer_idx)
    _FLUX_VAR_(data%id_pop) = _FLUX_VAR_(data%id_pop) + Fsed_pop
 
    ! Get sedimentation flux (mmmol/m2/s) loss into the sediment, crossing the SWI
+   ! NOTE: Psed is an ESTIMATE (w * C of the bottom water) used for the sediment
+   ! pools and swi_* diagnostics. It is not removed from the water here: the
+   ! host's mobility routine (e.g. GLM doMobility) removes settled particles from
+   ! the water as an export onto the bed, computed independently, so the two are
+   ! not a balanced water-sediment flux.
    IF (data%use_Psed_link_poc) THEN
      !-- linked variable requires populating
      Psed_poc = data%w_pom * max(zero_,poc)
@@ -1208,6 +1261,12 @@ SUBROUTINE aed_calculate_benthic_organic_matter(data,column,layer_idx)
    ! Set source & sink terms for the sediment pools (change per surface area per second)
    ! Note that this includes fluxes to and from the pelagic.
    IF( data%simSedimentOM>0 ) THEN
+      !# A host that delivers deposition credits the pools with what its settling
+      !# actually removed (aed_define_deposition above); the Psed estimate is then
+      !# not added as well (K19).
+      IF ( aed_host_deposition() ) THEN
+         Psed_poc = zero_ ; Psed_pon = zero_ ; Psed_pop = zero_
+      ENDIF
       _FLUX_VAR_B_(data%id_sed_poc) = _FLUX_VAR_B_(data%id_sed_poc) -(Fsed_poc + Psed_poc)
       _FLUX_VAR_B_(data%id_sed_pon) = _FLUX_VAR_B_(data%id_sed_pon) -(Fsed_pon + Psed_pon)
       _FLUX_VAR_B_(data%id_sed_pop) = _FLUX_VAR_B_(data%id_sed_pop) -(Fsed_pop + Psed_pop)

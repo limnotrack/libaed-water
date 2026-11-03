@@ -60,7 +60,7 @@ MODULE aed_oxygen
 !-------------------------------------------------------------------------------
    USE aed_core
 
-   USE aed_util,  ONLY: aed_gas_piston_velocity, aed_oxygen_sat
+   USE aed_util,  ONLY: aed_gas_piston_velocity, aed_oxygen_sat, aed_gas_exchange
 
    IMPLICIT NONE
 
@@ -77,7 +77,7 @@ MODULE aed_oxygen
       INTEGER  :: id_sed_oxy_pel, id_atm_oxy_exch3d
       INTEGER  :: id_temp, id_salt, id_wind
 !     INTEGER  :: id_larea, id_lht, id_cell_vel
-      INTEGER  :: id_lht, id_cell_vel
+      INTEGER  :: id_lht, id_cell_vel, id_tstep
 
       !# Model parameters
       AED_REAL :: Fsed_oxy,Ksed_oxy,theta_sed_oxy
@@ -212,7 +212,7 @@ SUBROUTINE aed_define_oxygen(data, namlst)
 
    ! Read the namelist
    read(namlst,nml=aed_oxygen,iostat=status)
-   IF (status /= 0) STOP 'Error reading namelist aed_oxygen'
+   IF (status /= 0) ERROR STOP 'Error reading namelist aed_oxygen'
 
    ! Store parameter values in the modules own derived type
    ! NB: all rates must be provided in values per day,
@@ -249,7 +249,7 @@ SUBROUTINE aed_define_oxygen(data, namlst)
                      'oxy_atm', 'mmol O2/m2/d', 'O2 exchange across atm/water interface', surf=.TRUE.)
     IF (diag_level>9) THEN
      data%id_sed_oxy_pel = aed_define_diag_variable(               &
-                     'oxy_dsfv', 'mmol O2/m3/d', 'O2 conc. change due to sediment oxygen demand', zavg=.TRUE.)
+                     'oxy_dsfv', 'mmol O2/m3/d', 'O2 conc. change due to sediment oxygen demand', zavg=.TRUE., bflux=.TRUE.)
 
      data%id_atm_oxy_exch3d = aed_define_diag_variable(      &
                      'oxy_atmv', 'mmol O2/m3/d', 'O2 conc. change due to atmospheric flux')
@@ -263,6 +263,7 @@ SUBROUTINE aed_define_oxygen(data, namlst)
    data%id_wind = aed_locate_sheet_global('wind_speed') ! Wind speed at 10 m above surface (m/s)
 !  data%id_larea = aed_locate_global('layer_area')
    data%id_lht = aed_locate_global('layer_ht')
+   data%id_tstep = aed_locate_sheet_global('timestep')   ! for exact air-water relaxation
    data%id_cell_vel = -1
    IF( oxy_piston_model>3 )data%id_cell_vel= aed_locate_global('cell_vel')! needed for k600
 END SUBROUTINE aed_define_oxygen
@@ -320,15 +321,22 @@ SUBROUTINE aed_calculate_surface_oxygen(data,column,layer_idx)
    IF(data%altitude>1) f_pres = aed_oxygen_fp(data%altitude,air_temp=10.)
    Coxy_air = f_pres * aed_oxygen_sat(salt,temp)
 
-   ! Get the oxygen flux
-   oxy_atm_flux = koxy_trans * (Coxy_air - oxy)
+   ! Get the oxygen flux, relaxing the surface layer towards saturation exactly
+   ! over the step so it cannot overshoot (= koxy_trans*(Coxy_air - oxy) for small steps)
+   oxy_atm_flux = aed_gas_exchange(koxy_trans, Coxy_air, oxy,                  &
+                         _STATE_VAR_(data%id_lht), _STATE_VAR_S_(data%id_tstep))
 
    ! Transfer surface exchange value to AED (mmmol/m2/s) converted by driver
    _FLUX_VAR_T_(data%id_oxy) = oxy_atm_flux
 
    ! Also store oxygen flux across the atm/water interface as a diagnostic (mmmol/m2/day)
     IF (data%id_atm_oxy_exch>0) _DIAG_VAR_S_(data%id_atm_oxy_exch) = oxy_atm_flux * secs_per_day
-    IF (data%id_oxy_sat>0)      _DIAG_VAR_(data%id_oxy_sat) =  Coxy_air
+    ! FIX 2026-08-29: this line used to write Coxy_air (the saturation
+    ! CONCENTRATION, mmol O2/m3) into id_oxy_sat, which is registered at ~L243
+    ! as 'dissolved oxygen saturation' in '%'. aed_calculate_oxygen (~L376)
+    ! writes the correct percentage (oxy/coxy_sat)*100. Depending on call order
+    ! the surface cell could be reported as a concentration in a % field.
+    ! Removed - the percentage form is the only writer now.
 
    ! Also store oxygen flux across the atm/water interface as a diagnostic (mmmol/m2/day)
     IF (data%id_atm_oxy_exch3d>0) &
