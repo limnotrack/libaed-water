@@ -569,8 +569,8 @@ SUBROUTINE aed_calculate_zooplankton(data,column,layer_idx)
             phy_i = phy_i + 1
             phy_INcon(phy_i) = _STATE_VAR_(data%zoops(zoop_i)%id_phyIN(phy_i))
             phy_IPcon(phy_i) = _STATE_VAR_(data%zoops(zoop_i)%id_phyIP(phy_i))
-            grazing_n = grazing_n + grazing_prey(prey_i) / prey(prey_i) * phy_INcon(phy_i) /14.0
-            grazing_p = grazing_p + grazing_prey(prey_i) / prey(prey_i) * phy_IPcon(phy_i) /31.0
+            grazing_n = grazing_n + grazing_prey(prey_i) / prey(prey_i) * phy_INcon(phy_i)
+            grazing_p = grazing_p + grazing_prey(prey_i) / prey(prey_i) * phy_IPcon(phy_i)
          ELSEIF (data%zoops(zoop_i)%prey(prey_i)%zoop_prey(1:15).EQ.'aed_zooplankton') THEN
             grazing_n = grazing_n + grazing_prey(prey_i) * data%zoops(zoop_i)%INC_zoo
             grazing_p = grazing_p + grazing_prey(prey_i) * data%zoops(zoop_i)%IPC_zoo
